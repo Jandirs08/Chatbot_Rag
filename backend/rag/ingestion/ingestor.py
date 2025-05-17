@@ -79,7 +79,7 @@ class RAGIngestor:
                 return self._error_result(filename, "No se generaron chunks")
             
             # Deduplicar chunks
-            unique_chunks = await self._deduplicate_chunks(chunks)
+            unique_chunks, unique_embeddings = await self._deduplicate_chunks(chunks, return_embeddings=True)
             if not unique_chunks:
                 return self._error_result(filename, "No quedaron chunks después de deduplicación")
             
@@ -87,12 +87,26 @@ class RAGIngestor:
             total_added = 0
             for i in range(0, len(unique_chunks), self.batch_size):
                 batch = unique_chunks[i:i + self.batch_size]
+                batch_embeddings = unique_embeddings[i:i + self.batch_size] if unique_embeddings else None
                 try:
-                    await self.vector_store.add_documents(batch)
-                    total_added += len(batch)
-                    logger.info(f"Lote {i//self.batch_size + 1} procesado: {len(batch)} chunks")
+                    for doc in batch:
+                        content_hash = doc.metadata.get('content_hash')
+                        if content_hash:
+                            await self.vector_store.delete_documents(filter={"content_hash": content_hash})
+                    if not isinstance(batch, list):
+                        raise TypeError(f"Batch is not a list before adding to vector store. Type: {type(batch)}")
+                    if not batch:
+                        logger.warning(f"Batch is empty before adding to vector store. Skipping batch {i//self.batch_size + 1}.")
+                        continue
+                    logger.debug(f"Calling _add_batch_to_vector_store for batch {i//self.batch_size + 1}.")
+                    try:
+                        await self._add_batch_to_vector_store(batch, i//self.batch_size + 1, embeddings=batch_embeddings)
+                        total_added += len(batch)
+                        logger.info(f"Lote {i//self.batch_size + 1} procesado: {len(batch)} chunks")
+                    except Exception as add_err:
+                        logger.error(f"Error procesando lote {i//self.batch_size + 1} en vector store: {add_err}", exc_info=True)
                 except Exception as e:
-                    logger.error(f"Error en lote {i//self.batch_size + 1}: {str(e)}")
+                    logger.error(f"Error en lote {i//self.batch_size + 1}: {str(e)}", exc_info=True)
             
             # Actualizar hashes procesados
             self._update_processed_hashes(unique_chunks)
@@ -191,55 +205,43 @@ class RAGIngestor:
     async def _is_already_processed(self, pdf_path: Path) -> bool:
         """Verifica si un PDF ya está procesado en el vector store."""
         try:
-            existing = await self.vector_store.get_documents(
-                filter={"source": pdf_path.name}
+            # Verificar si hay documentos con la misma fuente (nombre de archivo)
+            # La operación de get en Chroma es síncrona
+            existing_docs = self.vector_store.store._collection.get(
+                where={"source": pdf_path.name},
             )
-            return bool(existing)
+            # Si la lista de IDs no está vacía, significa que ya existen documentos para esta fuente.
+            return bool(existing_docs.get("ids"))
         except Exception as e:
             logger.error(f"Error verificando PDF procesado: {str(e)}")
             return False
 
-    async def _deduplicate_chunks(self, chunks: List[Document]) -> List[Document]:
-        """Elimina chunks duplicados o muy similares."""
+    async def _deduplicate_chunks(self, chunks: List[Document], return_embeddings: bool = False) -> (List[Document], list):
+        """Elimina chunks duplicados o muy similares y retorna también los embeddings si se solicita."""
         if not chunks:
-            return []
-        
+            return ([], []) if return_embeddings else []
         unique_chunks = []
+        unique_embeddings = []
         content_hashes = set()
-        
-        # Generar embeddings para comparación
         chunk_texts = [c.page_content for c in chunks]
-        embeddings = await self.embedding_manager.embed_documents(chunk_texts)
-        
+        embeddings = self.embedding_manager.embed_documents(chunk_texts)
         from sklearn.metrics.pairwise import cosine_similarity
         import numpy as np
-        
         for i, chunk in enumerate(chunks):
             content_hash = chunk.metadata.get('content_hash')
-            
-            # Verificar hash
             if content_hash in content_hashes:
                 continue
-            
-            # Verificar similitud semántica
             if unique_chunks:
-                # Comparar con chunks ya seleccionados
-                existing_embeddings = [
-                    embeddings[chunks.index(c)]
-                    for c in unique_chunks
-                ]
-                similarities = cosine_similarity(
-                    [embeddings[i]],
-                    existing_embeddings
-                )[0]
-                
+                existing_embeddings = [embeddings[chunks.index(c)] for c in unique_chunks]
+                similarities = cosine_similarity([embeddings[i]], existing_embeddings)[0]
                 if np.max(similarities) > settings.deduplication_threshold:
                     continue
-            
             unique_chunks.append(chunk)
+            unique_embeddings.append(embeddings[i])
             if content_hash:
                 content_hashes.add(content_hash)
-        
+        if return_embeddings:
+            return unique_chunks, unique_embeddings
         return unique_chunks
 
     def _update_processed_hashes(self, chunks: List[Document]) -> None:
@@ -269,13 +271,32 @@ class RAGIngestor:
             logger.error(f"Error limpiando vector store: {str(e)}")
             raise
 
-# Ejemplo de cómo se instanciaría (no va aquí):
-# from ...config import Settings
-# settings_instance = Settings()
-# pdf_manager = PDFFileManager(base_dir=Path("ruta/a/tu/proyecto")) # Ajustar base_dir
-# content_loader = PDFContentLoader(chunk_size=settings_instance.chunk_size, chunk_overlap=settings_instance.chunk_overlap)
-# embedding_mgr = EmbeddingManager(model_name=settings_instance.embedding_model)
-# vector_db = VectorStore(persist_directory=Path("ruta/a/tu/vector_store"), embedding_function=embedding_mgr.get_embedding_model())
-# ingestor = RAGIngestor(pdf_manager, content_loader, embedding_mgr, vector_db)
-# resultados_ingesta = ingestor.ingest_pdfs_from_directory()
-# print(resultados_ingesta) 
+    async def _add_batch_to_vector_store(self, batch: List[Document], batch_number: int, embeddings: list = None):
+        """Función auxiliar asíncrona para añadir un lote de documentos al vector store, permitiendo pasar embeddings."""
+        if not batch:
+            logger.warning(f"_add_batch_to_vector_store llamado con lote vacío para el lote {batch_number}.")
+            return # No hacer nada si el lote está vacío
+        if not isinstance(batch, list):
+            raise TypeError(f"Batch is not a list inside _add_batch_to_vector_store for batch {batch_number}. Type: {type(batch)}")
+        if not batch[0] or not isinstance(batch[0], Document):
+             raise TypeError(f"First element in batch is not a valid Document inside _add_batch_to_vector_store for batch {batch_number}. Type: {type(batch[0])}")
+        logger.debug(f"Attempting to add batch {batch_number} to vector store. Batch size: {len(batch)}.")
+        try:
+            await self.vector_store.add_documents(batch, embeddings=embeddings)
+            logger.debug(f"vector_store.add_documents completed successfully for batch {batch_number}.")
+        except TypeError as te:
+            raise TypeError(f"TypeError during vector_store.add_documents for batch {batch_number}. Error: {te}") from te
+        except Exception as ex:
+            logger.error(f"Unexpected error during vector_store.add_documents for batch {batch_number}: {ex}", exc_info=True)
+            raise ex # Re-lanzar la excepción principal si ocurre un error no manejado aquí
+
+    # Ejemplo de cómo se instanciaría (no va aquí):
+    # from ...config import Settings
+    # settings_instance = Settings()
+    # pdf_manager = PDFFileManager(base_dir=Path("ruta/a/tu/proyecto")) # Ajustar base_dir
+    # content_loader = PDFContentLoader(chunk_size=settings_instance.chunk_size, chunk_overlap=settings_instance.chunk_overlap)
+    # embedding_mgr = EmbeddingManager(model_name=settings_instance.embedding_model)
+    # vector_db = VectorStore(persist_directory=Path("ruta/a/tu/vector_store"), embedding_function=embedding_mgr.get_embedding_model())
+    # ingestor = RAGIngestor(pdf_manager, content_loader, embedding_mgr, vector_db)
+    # resultados_ingesta = ingestor.ingest_pdfs_from_directory()
+    # print(resultados_ingesta) 

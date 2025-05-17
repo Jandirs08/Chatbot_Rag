@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, env="DEBUG")
     
     # Configuraciones de Logging
-    log_level: str = Field(default="INFO", env="LOG_LEVEL")
+    log_level: str = Field(default="DEBUG", env="LOG_LEVEL")
     log_file: str = Field(default="app.log", env="LOG_FILE")
     log_format: str = Field(
         default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

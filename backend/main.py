@@ -50,6 +50,42 @@ if __name__ == "__main__":
         logging.basicConfig(level=logging.INFO) # Fallback básico
         logger = logging.getLogger(__name__)
         
+    # *** DEBUG: Limpiar Vector Store al inicio si una variable de entorno está configurada ***
+    import asyncio
+    if os.environ.get("CLEAR_VECTOR_STORE") == "true":
+        logger.warning("CLEAR_VECTOR_STORE=true detectado. Limpiando Vector Store antes de iniciar.")
+        # Necesitamos ejecutar esto en un bucle de eventos async
+        async def _clear_store_and_start():
+            try:
+                # Asumimos que app.state.rag_ingestor ya está disponible después de create_app
+                # Podríamos necesitar ajustar si create_app falla antes de inicializarlo
+                if hasattr(app.state, 'rag_ingestor') and hasattr(app.state.rag_ingestor, 'clear_vector_store_content'):
+                    await app.state.rag_ingestor.clear_vector_store_content()
+                    logger.info("Vector Store limpiado exitosamente por script de inicio.")
+                else:
+                    logger.error("No se pudo acceder a rag_ingestor para limpiar el vector store.")
+            except Exception as e:
+                logger.error(f"Error durante la limpieza del vector store al inicio: {e}", exc_info=True)
+            
+            # Luego iniciar el servidor Uvicorn (esto ya no se ejecutará si usamos asyncio.run para la limpieza)
+            # La limpieza debe ocurrir *antes* de uvicorn.run
+            # Una forma es ejecutar la limpieza en su propio bucle de eventos si es un script standalone, o integrarla en la inicialización de la app
+            # Dado que ya estamos en __main__ y uvicorn.run es blocking, una limpieza async aquí es compleja.
+            # La mejor forma es llamar a create_app que inicializa todo, y luego llamar al método de limpieza si existe.
+            # Vamos a refactorizar ligeramente para hacerlo posible: create_app puede retornar el ingestor.
+            pass # Placeholder, la lógica real estará después de create_app si se refactoriza, o llamando a clear_vector_store_content desde aquí si es síncrona.
+        
+        # Para ejecutar la limpieza async antes de uvicorn.run, necesitamos un bucle de eventos.
+        # Esto es un poco tricky porque uvicorn.run tiene su propio bucle.
+        # Alternativa simple: si clear_vector_store_content se pudiera llamar sync...
+        # PERO es async. La mejor forma es integrarlo *dentro* de la inicialización de FastAPI si la bandera está presente.
+        logger.warning("La limpieza async al inicio requiere cambios en create_app o una ejecución separada.")
+        logger.warning("Por favor, considere añadir la lógica de limpieza condicional dentro de create_app o ejecutarla manualmente con un script async.")
+        # raise SystemExit("Por favor, implemente la lógica de limpieza async en la inicialización de la app.") # O detener si es crítico
+        
+    # La limpieza async requiere ajustes en la estructura de inicialización.
+    # Mientras tanto, puedes intentar llamar a la ruta DELETE varias veces o implementar un script de limpieza async separado.
+    
     logger.info(f"Iniciando servidor Uvicorn en http://{settings.host}:{settings.port}")
     uvicorn.run(
         app, # app ya es la instancia de FastAPI

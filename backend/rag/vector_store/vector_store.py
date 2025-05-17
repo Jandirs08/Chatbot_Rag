@@ -10,6 +10,7 @@ import asyncio
 from functools import lru_cache
 import redis
 from fastapi import HTTPException
+import uuid
 
 from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
@@ -131,26 +132,47 @@ class VectorStore:
             logger.error(f"Error inicializando vector store: {str(e)}", exc_info=True)
             raise
 
-    async def add_documents(self, documents: List[Document]) -> None:
-        """Añade documentos al almacenamiento de forma optimizada."""
+    async def add_documents(self, documents: List[Document], embeddings: list = None) -> None:
+        """Añade documentos al almacenamiento de forma optimizada, permitiendo pasar embeddings explícitos."""
         if not documents:
             return
         try:
             # Procesar en lotes para optimizar memoria
             for i in range(0, len(documents), self.batch_size):
                 batch = documents[i:i + self.batch_size]
-                # Verificar duplicados por content_hash
+                processed_batch = []
                 for doc in batch:
-                    content_hash = doc.metadata.get('content_hash')
-                    if content_hash:
-                        await self.delete_documents(filter={"content_hash": content_hash})
-                # Añadir lote
-                self.store.add_documents(batch)
-            # Invalidar caché
+                    try:
+                        content_hash = doc.metadata.get('content_hash')
+                        if content_hash:
+                            try:
+                                await self.delete_documents(filter={"content_hash": content_hash})
+                            except Exception as delete_err:
+                                logger.error(f"Error deleting document with hash {content_hash}: {delete_err}", exc_info=True)
+                        processed_batch.append(doc)
+                    except Exception as doc_process_err:
+                        logger.error(f"Error processing document in batch {i//self.batch_size + 1}: {doc_process_err}", exc_info=True)
+                        continue
+                if processed_batch:
+                    texts = [doc.page_content for doc in processed_batch]
+                    metadatas = [doc.metadata for doc in processed_batch]
+                    ids = [doc.metadata.get('id') or f"{doc.metadata.get('source','unknown')}_{hash(doc.page_content)}" for doc in processed_batch]
+                    ids = [str(uuid.uuid4()) if id is None else str(id) for id in ids]
+                    try:
+                        add_kwargs = dict(documents=texts, metadatas=metadatas, ids=ids)
+                        if embeddings is not None:
+                            # Si se pasan embeddings, usar solo el slice correspondiente al batch
+                            batch_embeddings = embeddings[i:i + self.batch_size]
+                            add_kwargs['embeddings'] = batch_embeddings
+                        self.store._collection.add(**add_kwargs)
+                        logger.debug(f"Successfully added {len(processed_batch)} documents to Chroma collection for batch {i//self.batch_size + 1}.")
+                    except Exception as add_err:
+                        logger.error(f"Error adding documents to Chroma collection for batch {i//self.batch_size + 1}: {add_err}", exc_info=True)
             await self._invalidate_cache()
-            logger.info(f"{len(documents)} documentos añadidos al vector store")
+            logger.info(f"Ingestion process completed for {len(documents)} documents. Added to vector store.")
+            return None
         except Exception as e:
-            logger.error(f"Error añadiendo documentos: {str(e)}", exc_info=True)
+            logger.error(f"Error general añadiendo documentos al vector store: {str(e)}", exc_info=True)
             raise
 
     async def _get_document_embedding(self, content: str) -> np.ndarray:

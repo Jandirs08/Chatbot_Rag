@@ -257,13 +257,20 @@ class RAGRetriever:
                 # 4. Score por tipo de contenido
                 content_type_score = self._get_content_type_score(doc.metadata.get('chunk_type', 'text'))
                 
+                # 5. Factor de prioridad para PDFs
+                pdf_priority_factor = 1.0
+                source_path = doc.metadata.get('source', '')
+                if source_path and source_path.lower().endswith('.pdf'):
+                    # Aumentar el factor si la fuente es un PDF. Ajustar el valor (ej: 1.2) según sea necesario.
+                    pdf_priority_factor = 1.2 # Puedes ajustar este valor para mayor o menor prioridad
+
                 # Combinar scores con pesos
                 final_score = (
                     semantic_score * 0.4 +
                     quality_score * 0.3 +
                     length_score * 0.2 +
                     content_type_score * 0.1
-                )
+                ) * pdf_priority_factor # Aplicar el factor de prioridad del PDF aquí
                 
                 scored_docs.append((doc, final_score))
             
