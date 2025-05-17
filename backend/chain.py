@@ -143,6 +143,23 @@ class ChainManager:
         return model_class(**model_parameters)
 
     def _init_chain(self):
+        """Inicializa la cadena de procesamiento con el contexto."""
+        # Asegurarnos de que el prompt incluya el contexto
+        if "context" not in self._raw_prompt_template.input_variables:
+            self.logger.warning("El prompt no incluye la variable 'context'. Añadiéndola...")
+            template = self._raw_prompt_template.template
+            if "{context}" not in template:
+                template = "Contexto de la conversación:\n{context}\n\n" + template
+            self._raw_prompt_template = PromptTemplate.from_template(template)
+        
+        # Asegurarnos de que el prompt incluya el historial
+        if "history" not in self._raw_prompt_template.input_variables:
+            self.logger.warning("El prompt no incluye la variable 'history'. Añadiéndola...")
+            template = self._raw_prompt_template.template
+            if "{history}" not in template:
+                template = "Historial de la conversación:\n{history}\n\n" + template
+            self._raw_prompt_template = PromptTemplate.from_template(template)
+        
         self.chain: Runnable = (self._prompt | self._base_model)
         self.chain = self.chain.with_config(run_name="AgentPromptAndModel")
 
@@ -151,7 +168,20 @@ class ChainManager:
         return self.chain
 
     async def invoke_chain(self, input_dict: Dict[str, Any]) -> Message:
+        """Invoca la cadena con el contexto y el historial."""
         try:
+            # Asegurarnos de que el contexto esté presente
+            if "context" not in input_dict:
+                input_dict["context"] = "No hay contexto disponible."
+            
+            # Asegurarnos de que el historial esté presente
+            if "history" not in input_dict:
+                input_dict["history"] = "No hay historial disponible."
+            
+            # Combinar contexto e historial si son diferentes
+            if input_dict["context"] != input_dict["history"]:
+                input_dict["context"] = f"{input_dict['context']}\n\n{input_dict['history']}"
+            
             llm_output = await self.chain.ainvoke(input_dict)
             
             if hasattr(llm_output, 'content'):
@@ -160,10 +190,12 @@ class ChainManager:
                 output_content = llm_output['text']
             else:
                 output_content = str(llm_output)
-
-            return Message(message=output_content, role=self.settings.ai_prefix)
-        finally:
-            pass # wait_for_all_tracers() # COMMENTED OUT
+            
+            return Message(message=output_content, role="assistant")
+            
+        except Exception as e:
+            self.logger.error(f"Error en invoke_chain: {str(e)}", exc_info=True)
+            raise
 
     def stream_chain(self, input_dict: Dict[str, Any]):
         return self.chain.astream_log(

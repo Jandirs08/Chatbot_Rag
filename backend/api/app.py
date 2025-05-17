@@ -34,105 +34,107 @@ from ..rag.ingestion.ingestor import RAGIngestor
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan context manager for setup and teardown."""
-    logger = logging.getLogger(__name__) # Logger para lifespan
+    logger = logging.getLogger(__name__)
     logger.info("Iniciando aplicación y configurando recursos...")
     
-    # --- Inicialización de dependencias RAG y Chat --- 
-    # Esto necesita ser consistente con cómo se configuraron en los pasos anteriores.
-    # PDFFileManager (antes PDFProcessor en utils)
-    # PDFContentLoader (antes PDFProcessor en rag/pdf_processor)
-    # EmbeddingManager, VectorStore, RAGIngestor, RAGRetriever
-    # Bot, ChatManager
-    
-    # Ejemplo de inicialización (ajustar rutas y nombres de clase según sea necesario):
     try:
-        s = get_settings() # Obtener settings
-        
-        app.state.settings = s # Hacer settings disponibles en app.state también
+        s = get_settings()
+        app.state.settings = s
 
-        # Gestor de archivos PDF
+        # Inicializar componentes
         app.state.pdf_file_manager = PDFFileManager(base_dir=Path(s.base_data_dir).resolve() if s.base_data_dir else None)
         logger.info(f"PDFFileManager inicializado. Directorio de PDFs: {app.state.pdf_file_manager.pdf_dir}")
 
-        # Cargador de contenido PDF
         app.state.pdf_content_loader = PDFContentLoader(chunk_size=s.chunk_size, chunk_overlap=s.chunk_overlap)
         logger.info(f"PDFContentLoader inicializado con chunk_size={s.chunk_size}, overlap={s.chunk_overlap}")
 
-        # Gestor de Embeddings
         app.state.embedding_manager = EmbeddingManager(model_name=s.embedding_model)
         logger.info(f"EmbeddingManager inicializado con modelo: {s.embedding_model}")
 
-        # Vector Store (ej. Chroma)
-        # Asegúrate de que VectorStore es la clase correcta (ej. ChromaVectorStore) y que su constructor es compatible.
         vector_store_path = Path(s.vector_store_path).resolve()
-        vector_store_path.mkdir(parents=True, exist_ok=True) # Asegurar que el directorio existe
+        vector_store_path.mkdir(parents=True, exist_ok=True)
         app.state.vector_store = VectorStore(
-            persist_directory=str(vector_store_path), 
-            embedding_function=app.state.embedding_manager # Pasar la instancia de EmbeddingManager directamente
+            persist_directory=str(vector_store_path),
+            embedding_function=app.state.embedding_manager
         )
         logger.info(f"VectorStore inicializado en: {vector_store_path}")
 
-        # Ingestor RAG
         app.state.rag_ingestor = RAGIngestor(
             pdf_file_manager=app.state.pdf_file_manager,
             pdf_content_loader=app.state.pdf_content_loader,
-            embedding_manager=app.state.embedding_manager, # Pasado para referencia si es necesario
+            embedding_manager=app.state.embedding_manager,
             vector_store=app.state.vector_store
         )
         logger.info("RAGIngestor inicializado.")
 
-        # Retriever RAG
         app.state.rag_retriever = RAGRetriever(
             vector_store=app.state.vector_store,
-            embedding_manager=app.state.embedding_manager # Opcional
+            embedding_manager=app.state.embedding_manager
         )
         logger.info("RAGRetriever inicializado.")
 
-        # Determinar memory_type para el Bot desde settings
-        bot_memory_type = MemoryTypes.BASE_MEMORY # Default
+        bot_memory_type = MemoryTypes.BASE_MEMORY
         if s.memory_type:
             try:
                 bot_memory_type = MemoryTypes[s.memory_type.upper()]
             except KeyError:
                 logger.warning(f"Tipo de memoria '{s.memory_type}' no válido en settings. Usando BASE_MEMORY.")
-        
-        # Aquí podrías añadir herramientas personalizadas si las tienes, además de las de RAG que el Bot podría usar internamente.
-        # tools_list = [CustomSearchTool(retriever=app.state.rag_retriever)] # Ejemplo
 
         app.state.bot_instance = Bot(
-            settings=s,
+            settings=settings,
             memory_type=bot_memory_type,
-            model_type=s.model_type, # Asumiendo que s.model_type es del tipo ModelTypes o string convertible
-            # tools_list=tools_list # Si se definen herramientas
+            memory_kwargs={"conversation_id": "default_session"},
+            cache=None
         )
-        logger.info(f"Instancia de Bot creada con tipo de memoria: {bot_memory_type} y modelo: {s.model_type}")
+        logger.info(f"Instancia de Bot creada con tipo de memoria: {bot_memory_type}")
 
-        # ChatManager
         app.state.chat_manager = ChatManager(
             bot_instance=app.state.bot_instance,
-            rag_retriever_instance=app.state.rag_retriever # Pasar la instancia de RAGRetriever
-            )
+            rag_retriever_instance=app.state.rag_retriever
+        )
         logger.info("ChatManager inicializado.")
 
         logger.info("Todos los managers y procesadores inicializados y disponibles en app.state.")
 
     except Exception as e:
         logger.error(f"Error fatal durante la inicialización en lifespan: {e}", exc_info=True)
-        # Podrías querer que la aplicación no inicie si estos componentes fallan.
-        # Aquí podrías re-lanzar la excepción o manejarla de otra forma.
         raise
 
     yield
     
     logger.info("Cerrando aplicación y liberando recursos...")
-    if hasattr(app.state.chat_manager, 'close') and callable(app.state.chat_manager.close):
-        if asyncio.iscoroutinefunction(app.state.chat_manager.close):
-            await app.state.chat_manager.close()
-        else:
-            app.state.chat_manager.close()
-        logger.info("ChatManager cerrado.")
-    # Otros cierres si son necesarios (ej. DB connections en VectorStore si no se manejan internamente)
-    logger.info("Recursos liberados.")
+    try:
+        # Cerrar ChatManager
+        if hasattr(app.state, 'chat_manager'):
+            if hasattr(app.state.chat_manager, 'close'):
+                if asyncio.iscoroutinefunction(app.state.chat_manager.close):
+                    await app.state.chat_manager.close()
+                else:
+                    app.state.chat_manager.close()
+            logger.info("ChatManager cerrado.")
+
+        # Cerrar VectorStore
+        if hasattr(app.state, 'vector_store'):
+            if hasattr(app.state.vector_store, 'close'):
+                if asyncio.iscoroutinefunction(app.state.vector_store.close):
+                    await app.state.vector_store.close()
+                else:
+                    app.state.vector_store.close()
+            logger.info("VectorStore cerrado.")
+
+        # Cerrar EmbeddingManager
+        if hasattr(app.state, 'embedding_manager'):
+            if hasattr(app.state.embedding_manager, 'close'):
+                if asyncio.iscoroutinefunction(app.state.embedding_manager.close):
+                    await app.state.embedding_manager.close()
+                else:
+                    app.state.embedding_manager.close()
+            logger.info("EmbeddingManager cerrado.")
+
+    except Exception as e:
+        logger.error(f"Error durante la limpieza de recursos: {e}", exc_info=True)
+    finally:
+        logger.info("Proceso de limpieza completado.")
 
 def create_app() -> FastAPI:
     """Create the FastAPI application."""
@@ -208,4 +210,4 @@ def create_app() -> FastAPI:
 
 # --- Creación de la instancia global de la aplicación --- 
 # Esto permite que Uvicorn la encuentre si se ejecuta este archivo directamente (aunque es mejor usar main.py)
-# global_app = create_app() # Comentado o eliminado si main.py es el único punto de entrada. 
+# global_app = create_app() # Comentado o eliminado si main.py es el único punto de entrada.

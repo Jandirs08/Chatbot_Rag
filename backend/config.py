@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     # Configuraciones de MongoDB
     mongo_uri: SecretStr = Field(..., env="MONGO_URI")
     mongo_database_name: str = Field(default="chatbot_rag_db", env="MONGO_DATABASE_NAME")
+    mongo_collection_name: str = Field(default="chat_history", env="MONGO_COLLECTION_NAME") # <--- AÑADIR ESTA LÍNEA
     mongo_max_pool_size: int = Field(default=100, env="MONGO_MAX_POOL_SIZE")
     mongo_timeout_ms: int = Field(default=5000, env="MONGO_TIMEOUT_MS")
     
@@ -67,7 +68,7 @@ class Settings(BaseSettings):
     redis_max_memory: str = Field(default="2gb", env="REDIS_MAX_MEMORY")
     
     # Configuraciones de Memoria
-    memory_type: str = Field(default="base-memory", env="MEMORY_TYPE")
+    memory_type: str = Field(default="BASE_MEMORY", env="MEMORY_TYPE")
     max_memory_entries: int = Field(default=1000, env="MAX_MEMORY_ENTRIES")
     
     # Configuraciones de RAG - Procesamiento de PDFs
@@ -167,4 +168,4 @@ def get_settings() -> Settings:
     Returns:
         Application settings object.
     """
-    return settings 
+    return settings

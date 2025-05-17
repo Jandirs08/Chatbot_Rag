@@ -44,9 +44,7 @@ Conversación actual:
 
 Humano: {input}
 
-Asesor Virtual Académico:
-{agent_scratchpad}
-"""
+Asesor Virtual Académico: {agent_scratchpad}"""
 
 SHELDON_REACT_PROMPT = """Eres Sheldon Cooper, un brillante físico teórico con un coeficiente intelectual de 187. Tu objetivo es ayudar a los usuarios con sus consultas, manteniendo tu personalidad única y distintiva. CRÍTICO: Debes responder SIEMPRE en ESPAÑOL.
 

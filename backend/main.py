@@ -1,9 +1,12 @@
 """Main entry point for the chatbot application."""
 import os
+import signal
+import sys
 from dotenv import load_dotenv
 import uvicorn
 import logging
 from pathlib import Path
+import asyncio
 
 # Cargar variables de entorno PRIMERO
 env_path = Path(__file__).resolve().parent / '.env' # .resolve() para mayor robustez
@@ -26,6 +29,15 @@ from .config import settings # settings puede seguir siendo útil aquí para uvi
 # Esto significa que create_app() debe ser llamado antes de que este logger se use extensivamente.
 # O, si es necesario loguear antes, el formato será el default de Python.
 
+def handle_exit(signum, frame):
+    """Manejador de señales para una limpieza ordenada."""
+    print("\nCerrando servidor...")
+    sys.exit(0)
+
+# Registrar manejadores de señales
+signal.signal(signal.SIGINT, handle_exit)
+signal.signal(signal.SIGTERM, handle_exit)
+
 # Crear la aplicación FastAPI
 # Cualquier error crítico de inicialización (como API keys faltantes) debería ocurrir dentro de create_app()
 # y detener el proceso allí si es necesario.
@@ -39,10 +51,10 @@ except ValueError as e:
     # El logger aquí podría no estar formateado como se espera si create_app falló muy temprano.
     print(f"Error CRÍTICO al crear la aplicación FastAPI: {e}. El servidor no puede iniciar.")
     # Salir si la app no se pudo crear debido a un error fatal de configuración.
-    exit(1)
+    sys.exit(1)
 except Exception as e:
     print(f"Una excepción inesperada ocurrió al crear la aplicación FastAPI: {e}. El servidor no puede iniciar.")
-    exit(1)
+    sys.exit(1)
 
 if __name__ == "__main__":
     # El logger aquí ya debería estar configurado por create_app()
@@ -51,7 +63,6 @@ if __name__ == "__main__":
         logger = logging.getLogger(__name__)
         
     # *** DEBUG: Limpiar Vector Store al inicio si una variable de entorno está configurada ***
-    import asyncio
     if os.environ.get("CLEAR_VECTOR_STORE") == "true":
         logger.warning("CLEAR_VECTOR_STORE=true detectado. Limpiando Vector Store antes de iniciar.")
         # Necesitamos ejecutar esto en un bucle de eventos async
@@ -86,10 +97,27 @@ if __name__ == "__main__":
     # La limpieza async requiere ajustes en la estructura de inicialización.
     # Mientras tanto, puedes intentar llamar a la ruta DELETE varias veces o implementar un script de limpieza async separado.
     
-    logger.info(f"Iniciando servidor Uvicorn en http://{settings.host}:{settings.port}")
-    uvicorn.run(
-        app, # app ya es la instancia de FastAPI
-        host=settings.host, 
-        port=settings.port, 
-        log_level=settings.log_level.lower() # Uvicorn usa lowercase para log level
-    )
+    # Configurar el bucle de eventos de asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        logger.info(f"Iniciando servidor Uvicorn en http://{settings.host}:{settings.port}")
+        uvicorn.run(
+            app,
+            host=settings.host,
+            port=settings.port,
+            log_level=settings.log_level.lower(),
+            loop=loop
+        )
+    except KeyboardInterrupt:
+        logger.info("Servidor detenido por interrupción del usuario")
+    except Exception as e:
+        logger.error(f"Error al iniciar el servidor: {e}")
+    finally:
+        # Limpiar recursos
+        try:
+            loop.run_until_complete(app.state.chat_manager.close())
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error al limpiar recursos: {e}")

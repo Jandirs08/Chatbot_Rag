@@ -12,7 +12,13 @@ from langchain.agents.format_scratchpad import format_log_to_str
 from langchain.agents.output_parsers import ReActSingleInputOutputParser
 # from langchain_core.tracers.context import wait_for_all_tracers # COMMENTED OUT
 
-from .memory import MemoryTypes, MEM_TO_CLASS, AbstractChatbotMemory
+from .memory import (
+    MemoryTypes, 
+    MEM_TO_CLASS, 
+    AbstractChatbotMemory,
+    BaseChatbotMemory,  # Asegurar que esta importación esté presente
+    CustomMongoChatbotMemory
+)
 from .models import ModelTypes
 from .common.objects import Message, MessageTurn
 from .common.constants import *
@@ -26,26 +32,19 @@ from .config import Settings, get_settings
 class Bot:
     def __init__(
             self,
-            settings: Optional[Settings] = None,
+            settings: Settings,
             memory_type: Optional[MemoryTypes] = None,
-            cache: Optional[CacheTypes] = None,
-            model_type: Optional[ModelTypes] = None,
             memory_kwargs: Optional[dict] = None,
-            custom_bot_personality_str: Optional[str] = None,
-            tools_list: Optional[List[Any]] = None
+            cache: Optional[CacheTypes] = None,
+            model_type: Optional[ModelTypes] = None
     ):
-        self.settings = settings if settings is not None else get_settings()
-        self.tools = tools_list if tools_list is not None else [CustomSearchTool()]
+        self.settings = settings
+        self.logger = logging.getLogger(self.__class__.__name__)  # Add logger initialization
         
-        self.chain_manager = ChainManager(
-            settings=self.settings,
-            model_type=model_type,
-            tools_list=self.tools,
-            custom_bot_personality_str=custom_bot_personality_str
+        self._memory: AbstractChatbotMemory = self.get_memory(
+            memory_type=memory_type,
+            parameters=memory_kwargs
         )
-        
-        self.input_queue = Queue(maxsize=6)
-        self._memory: AbstractChatbotMemory = self.get_memory(memory_type=memory_type, parameters=memory_kwargs)
         if cache == CacheTypes.GPTCache and (model_type or ModelTypes[self.settings.model_type.upper()]) != ModelTypes.OPENAI:
             self.logger.warning("GPTCache solo es compatible con modelos OpenAI. Desactivando caché.")
             cache = None
@@ -53,6 +52,19 @@ class Bot:
         self.anonymizer = BotAnonymizer(settings=self.settings)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.agent_executor: Optional[AgentExecutor] = None
+        
+        # Inicializar tools
+        self.tools = []
+        if self.settings.serpapi_api_key:
+            self.tools.append(CustomSearchTool(api_key=self.settings.serpapi_api_key.get_secret_value()))
+        
+        # Inicializar chain_manager
+        self.chain_manager = ChainManager(
+            settings=self.settings,
+            model_type=model_type,
+            tools_list=self.tools
+        )
+        
         self.start_agent()
 
     @property
@@ -62,14 +74,23 @@ class Bot:
     def start_agent(self):
         agent_runnable_core: Runnable = self.chain_manager.runnable_chain
 
+        async def get_history_async(x):
+            # Asegurarnos de que conversation_id esté disponible
+            conversation_id = x.get("conversation_id", "default_session")
+            history = await self.memory.get_history(conversation_id)
+            return self._format_history_to_string(history)
+
+        def format_scratchpad(x):
+            # Formatear el scratchpad para el agente
+            if "intermediate_steps" in x:
+                return format_log_to_str(x["intermediate_steps"])
+            return ""
+
         history_loader = RunnableMap({
             "input": itemgetter("input"),
-            "agent_scratchpad": itemgetter("intermediate_steps") | RunnableLambda(format_log_to_str),
-            "history": RunnableLambda(
-                lambda x: self._format_history_to_string(
-                    self.memory.load_history(x["conversation_id"])
-                )
-            )
+            "history": RunnableLambda(get_history_async),
+            "conversation_id": itemgetter("conversation_id"),
+            "agent_scratchpad": RunnableLambda(format_scratchpad)
         }).with_config(run_name="LoadHistoryAndPrepareAgentInput")
 
         agent_chain_with_history = history_loader | agent_runnable_core
@@ -91,35 +112,68 @@ class Bot:
             handle_parsing_errors=True
         )
 
+    # En el método get_memory, asegurar que el fallback use BaseChatbotMemory
     def get_memory(
             self,
-            parameters: dict = None,
-            memory_type: Optional[MemoryTypes] = None
+            memory_type: Optional[MemoryTypes] = None,
+            parameters: Optional[dict] = None
     ) -> AbstractChatbotMemory:
         parameters = parameters or {}
-        if memory_type is None:
-            try:
-                memory_type_str = self.settings.memory_type.upper()
-                memory_type = MemoryTypes[memory_type_str]
-                self.logger.info(f"Usando tipo de memoria de settings: {memory_type_str}")
-            except (AttributeError, KeyError):
-                self.logger.warning("memory_type no en settings o inválido. Defaulting a BASE_MEMORY.")
-                memory_type = MemoryTypes.BASE_MEMORY
-        if memory_type not in MEM_TO_CLASS:
-            raise ValueError(
-                f"Got unknown memory type: {memory_type}. "
-                f"Valid types are: {MEM_TO_CLASS.keys()}."
-            )
-        memory_class = MEM_TO_CLASS[memory_type]
+        # memory_type_str se determina a partir de memory_type o self.settings.memory_type
+        memory_type_str = memory_type.value if memory_type else self.settings.memory_type
         
-        mem_kwargs = parameters.copy()
-        if 'k' not in mem_kwargs and hasattr(self.settings, 'memory_window_size'):
-            mem_kwargs['k'] = self.settings.memory_window_size
+        # Validar memory_type_str y obtener la clase de memoria
+        if memory_type_str not in MEM_TO_CLASS:
+            self.logger.warning(f"Tipo de memoria '{memory_type_str}' no válido. Usando '{MemoryTypes.BASE_MEMORY.value}'.")
+            memory_type_str = MemoryTypes.BASE_MEMORY.value # Usar el valor del Enum
+            
+        memory_class = MEM_TO_CLASS[memory_type_str]
         
-        return memory_class(settings=self.settings, **mem_kwargs)
+        # Solución al AttributeError:
+        # La línea original era:
+        # memory_config = self.settings.memory_configurations.get(memory_type_str, {})
+        # Esto causaba un error porque 'self.settings' no tiene un atributo 'memory_configurations'.
+        # Asumimos que las configuraciones específicas de la memoria deben pasarse a través del argumento 'parameters'.
+        # Si se necesitaran configuraciones predeterminadas globales desde 'settings' para cada tipo de memoria,
+        # el atributo 'memory_configurations' (como un diccionario) debería definirse primero en la clase Settings en config.py.
+        memory_config_from_settings = {} 
 
-    @property
-    def streaming_model_kwargs(self):
+        # Los 'parameters' (provenientes de memory_kwargs en Bot.__init__) tienen prioridad.
+        final_params = {**memory_config_from_settings, **parameters}
+        
+        # Asegurar que 'settings' esté en los parámetros para la clase de memoria
+        if 'settings' not in final_params:
+            final_params['settings'] = self.settings
+        
+        # Configuración específica y valores predeterminados para CustomMongoChatbotMemory
+        if memory_class == CustomMongoChatbotMemory:
+            if 'conversation_id' not in final_params:
+                self.logger.debug(f"CustomMongoChatbotMemory: 'conversation_id' no encontrado en final_params. Usando 'default_bot_session'. Claves actuales: {list(final_params.keys())}")
+                final_params['conversation_id'] = 'default_bot_session' 
+            
+            if 'k_history' not in final_params:
+                default_k_history = getattr(self.settings, 'max_memory_entries', 10) 
+                self.logger.debug(f"CustomMongoChatbotMemory: 'k_history' no encontrado en final_params. Usando default: {default_k_history}. Claves actuales: {list(final_params.keys())}")
+                final_params['k_history'] = default_k_history
+
+        try:
+            self.logger.debug(f"Instanciando memoria {memory_class.__name__} con las claves de parámetros: {list(final_params.keys())}")
+            return memory_class(**final_params)
+        except Exception as e:
+            self.logger.error(f"Error al instanciar la memoria {memory_class.__name__} con params {final_params}: {e}", exc_info=True)
+            self.logger.warning(f"Fallback a BaseChatbotMemory debido a error de instanciación. Params originales pasados a get_memory: {parameters}")
+            
+            base_fallback_params = {
+                'settings': self.settings,
+                'session_id': final_params.get('conversation_id', 'default_fallback_session'),
+                'window_size': self.settings.max_memory_entries 
+            }
+            if parameters: 
+                base_fallback_params.update({k: v for k, v in parameters.items() if k not in ['settings', 'session_id', 'window_size']})
+
+            return BaseChatbotMemory(**base_fallback_params)  # Usar BaseChatbotMemory consistentemente
+
+    async def get_response(self, session_id: str, query: str, **kwargs) -> Message:
         base_kwargs = self.chain_manager._base_model.dict()
         
         valid_llm_kwargs = ["model_name", "temperature", "max_tokens", "top_p", "top_k", "model_kwargs", "max_output_tokens"]
@@ -140,7 +194,7 @@ class Bot:
     def reset_history(self, conversation_id: str):
         self.memory.clear(conversation_id=conversation_id)
 
-    def add_message_to_memory(
+    async def add_message_to_memory(
             self,
             human_message: Union[Message, str],
             ai_message: Union[Message, str],
@@ -151,38 +205,64 @@ class Bot:
         if isinstance(ai_message, str):
             ai_message = Message(message=ai_message, role=self.settings.ai_prefix)
 
-        turn = MessageTurn(
-            human_message=human_message,
-            ai_message=ai_message,
-            conversation_id=conversation_id
+        # Añadir mensaje del usuario
+        await self.memory.add_message(
+            session_id=conversation_id,
+            role="human",
+            content=human_message.message
         )
-        self.memory.add_message(turn)
+        
+        # Añadir respuesta del bot
+        await self.memory.add_message(
+            session_id=conversation_id,
+            role="ai",
+            content=ai_message.message
+        )
 
-    async def __call__(self, message: Message, conversation_id: str) -> Message:
-        if not self.agent_executor:
-            self.logger.error("AgentExecutor no inicializado. Llamar a start_agent() primero.")
-            return Message(message="Error: Agente no inicializado.", role=self.settings.ai_prefix)
+    async def __call__(self, x: Dict[str, Any]) -> Dict[str, Any]:
+        """Maneja la llamada al bot con el contexto y el historial."""
         try:
-            input_msg_content = message.message if hasattr(message, 'message') else str(message)
+            # Asegurarnos de que conversation_id esté presente
+            conversation_id = x.get("conversation_id", "default_session")
             
-            if self.settings.enable_anonymizer:
-                anonymized_data = self.anonymizer.anonymize_func({"input": input_msg_content})
-                input_msg_content = anonymized_data.get("input", input_msg_content)
-
-            agent_input = {"input": input_msg_content, "conversation_id": conversation_id}
+            # Obtener el historial y formatearlo
+            history = await self.memory.get_history(conversation_id)
+            history_str = self._format_history_to_string(history)
             
-            response_data = await self.agent_executor.ainvoke(agent_input)
-            output = response_data.get('output', "No se pudo obtener respuesta del agente.")
+            # Preparar el input para el agente
+            agent_input = {
+                "input": x["input"],
+                "history": history_str,
+                "context": history_str,  # Añadir el historial como contexto
+                "conversation_id": conversation_id  # Asegurarnos de que conversation_id esté presente
+            }
             
-            if self.settings.enable_anonymizer:
-                output = self.anonymizer.anonymizer.deanonymize(output)
-
-            return Message(message=str(output), role=self.settings.ai_prefix)
+            # Ejecutar el agente
+            result = await self.agent_executor.ainvoke(agent_input)
+            
+            # Extraer la respuesta final del resultado
+            if isinstance(result, dict):
+                if "output" in result:
+                    final_response = result["output"]
+                elif "answer" in result:
+                    final_response = result["answer"]
+                else:
+                    final_response = str(result)
+            else:
+                final_response = str(result)
+            
+            # Añadir mensajes a la memoria
+            await self.add_message_to_memory(
+                human_message=x["input"],
+                ai_message=final_response,
+                conversation_id=conversation_id
+            )
+            
+            return {"output": final_response}
+            
         except Exception as e:
-            self.logger.error(f"Error durante la ejecución del agente: {e}", exc_info=True)
-            return Message(message=f"Lo siento, ocurrió un error al procesar tu solicitud: {e}", role=self.settings.ai_prefix)
-        finally:
-            pass # wait_for_all_tracers() # COMMENTED OUT
+            self.logger.error(f"Error en __call__: {str(e)}", exc_info=True)
+            raise
 
     def predict(self, sentence: str, conversation_id: str = None) -> Message:
         message = Message(message=sentence, role=self.settings.human_prefix)
@@ -206,37 +286,17 @@ class Bot:
         conversation_id = input_data.get("conversation_id")
         return self.predict(sentence=sentence, conversation_id=conversation_id)
 
-    def _format_history_to_string(self, history_messages: List[Any]) -> str:
-        """Formatea una lista de mensajes de historial en una sola cadena."""
-        if not history_messages:
-            return "No hay historial de conversación previo."
-        
+    def _format_history_to_string(self, history: List[Dict[str, Any]]) -> str:
+        """Formatea el historial de mensajes a una cadena de texto."""
         formatted_history = []
-        # Determinar el nombre del AI basado en la plantilla de prompt actual para consistencia
-        # Esto es una heurística; una mejor manera sería tener un campo "bot_display_name" en settings.
-        ai_display_name = "Asesor Virtual Académico" # Default al nuevo nombre
-        if self.settings.main_prompt_name == "SHELDON_REACT_PROMPT":
-            ai_display_name = "Sheldon"
-            
-        for msg in history_messages:
-            # Para el rol, verificamos el tipo de mensaje LangChain o el campo 'role' si es nuestro BotMessage
-            is_human = False
-            if hasattr(msg, 'type') and isinstance(msg.type, str):
-                 is_human = msg.type.lower() == 'human'
-            elif hasattr(msg, 'role') and isinstance(msg.role, str):
-                 is_human = msg.role.lower() == 'user' # settings.human_prefix ahora es 'user'
-
-            is_ai = False
-            if hasattr(msg, 'type') and isinstance(msg.type, str):
-                is_ai = msg.type.lower() == 'ai' or msg.type.lower() == 'aimessage' or msg.type.lower() == 'aimessagechunk'
-            elif hasattr(msg, 'role') and isinstance(msg.role, str):
-                is_ai = msg.role.lower() == 'assistant' # settings.ai_prefix ahora es 'assistant'
-
-            role_display = "Humano" if is_human else \
-                           ai_display_name if is_ai else \
-                           "Desconocido"
-            
-            content = getattr(msg, 'content', getattr(msg, 'message', ''))
-            formatted_history.append(f"{role_display}: {content}")
+        
+        for msg in history:
+            if msg["role"] == "system":
+                # El mensaje del sistema contiene el contexto
+                formatted_history.append(msg["content"])
+            else:
+                # Formatear mensajes normales
+                role = "Usuario" if msg["role"] == "human" else "Asistente"
+                formatted_history.append(f"{role}: {msg['content']}")
         
         return "\n".join(formatted_history)

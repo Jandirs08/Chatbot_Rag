@@ -56,7 +56,15 @@ class ChatManager:
             
             user_message_for_bot = BotMessage(message=full_input_for_bot, role=settings.human_prefix)
 
-            ai_response_message = await self.bot(user_message_for_bot, conversation_id)
+            # Preparar el input para el bot
+            bot_input = {
+                "input": full_input_for_bot,
+                "conversation_id": conversation_id
+            }
+            
+            # Llamar al bot con el input correcto
+            result = await self.bot(bot_input)
+            ai_response_message = BotMessage(message=result["output"], role=settings.ai_prefix)
             
             response_content = ai_response_message.message
 
