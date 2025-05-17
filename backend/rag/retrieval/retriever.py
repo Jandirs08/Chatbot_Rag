@@ -262,15 +262,15 @@ class RAGRetriever:
                 source_path = doc.metadata.get('source', '')
                 if source_path and source_path.lower().endswith('.pdf'):
                     # Aumentar el factor si la fuente es un PDF. Ajustar el valor (ej: 1.2) según sea necesario.
-                    pdf_priority_factor = 1.2 # Puedes ajustar este valor para mayor o menor prioridad
+                    pdf_priority_factor = 1.5 # Aumentado de 1.2 a 1.5 para dar más prioridad a PDFs
 
                 # Combinar scores con pesos
                 final_score = (
-                    semantic_score * 0.4 +
-                    quality_score * 0.3 +
-                    length_score * 0.2 +
-                    content_type_score * 0.1
-                ) * pdf_priority_factor # Aplicar el factor de prioridad del PDF aquí
+                    semantic_score * 0.5 +
+                    quality_score * 0.35 +
+                    length_score * 0.1 +
+                    content_type_score * 0.05
+                ) * pdf_priority_factor
                 
                 scored_docs.append((doc, final_score))
             

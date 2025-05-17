@@ -198,28 +198,88 @@ class PDFContentLoader:
         
         return final_chunks
 
+    def _extract_important_terms(self, text: str) -> List[str]:
+        """Extrae términos importantes del texto basándose en patrones y contexto."""
+        important_terms = set()
+        
+        # Patrones genéricos para identificar términos importantes
+        patterns = [
+            r'(?:importante|requisito|necesario|requiere|debe|obligatorio)[:\s]+([^.\n]+)',
+            r'(?:proceso|procedimiento|instrucciones)[:\s]+([^.\n]+)',
+            r'(?:nota|atención|consideración)[:\s]+([^.\n]+)',
+            r'(?:requisitos|documentación)[:\s]+([^.\n]+)',
+            r'(?:definición|concepto|término)[:\s]+([^.\n]+)',
+            r'(?:objetivo|meta|propósito)[:\s]+([^.\n]+)',
+            r'(?:característica|propiedad|atributo)[:\s]+([^.\n]+)',
+            r'(?:clasificación|categoría|tipo)[:\s]+([^.\n]+)'
+        ]
+        
+        # Buscar términos usando patrones
+        for pattern in patterns:
+            matches = re.finditer(pattern, text.lower())
+            for match in matches:
+                term = match.group(1).strip()
+                if len(term.split()) <= 4:  # Limitar a frases de hasta 4 palabras
+                    important_terms.add(term)
+        
+        # Extraer términos de listas numeradas o con viñetas
+        list_items = re.findall(r'(?:^|\n)[•\-\*]\s*([^.\n]+)', text)
+        important_terms.update(item.strip() for item in list_items)
+        
+        # Extraer términos después de dos puntos
+        colon_terms = re.findall(r':\s*([^.\n]+)', text)
+        important_terms.update(term.strip() for term in colon_terms if len(term.split()) <= 4)
+        
+        # Extraer términos en negrita o cursiva si están disponibles en el PDF
+        emphasis_terms = re.findall(r'\*\*([^*]+)\*\*|\*([^*]+)\*', text)
+        for term in emphasis_terms:
+            if isinstance(term, tuple):
+                term = term[0] or term[1]
+            if term and len(term.split()) <= 4:
+                important_terms.add(term.strip())
+        
+        return list(important_terms)
+
     def _calculate_chunk_quality(self, content: str) -> float:
-        """Calcula un score de calidad para el chunk."""
-        # Inicializar score base
+        """Calcula la calidad de un chunk basándose en varios factores."""
         score = 1.0
         
-        # Penalizar chunks muy cortos
-        length_score = min(len(content) / 1000, 1.0)
-        score *= length_score
+        # Penalización por chunks muy cortos
+        if len(content) < 50:
+            score *= 0.7
         
-        # Penalizar chunks con poco contenido significativo
+        # Penalización por densidad de palabras baja
         words = content.split()
-        word_density = len(words) / (len(content) + 1)
-        score *= min(word_density * 5, 1.0)
+        if len(words) < 10:
+            score *= 0.8
         
-        # Penalizar chunks con muchos caracteres especiales
-        special_char_ratio = len(re.findall(r'[^a-zA-Z0-9\s.,!?]', content)) / (len(content) + 1)
-        score *= (1 - special_char_ratio)
+        # Penalización por alta proporción de caracteres especiales
+        special_chars = len(re.findall(r'[^\w\s]', content))
+        if special_chars / len(content) > 0.3:
+            score *= 0.8
         
-        # Bonificar chunks con estructura clara
-        if re.search(r'^[A-Z].*[.!?]$', content):  # Comienza con mayúscula y termina con puntuación
+        # Bonus por estructura gramatical correcta
+        if content[0].isupper() and content[-1] in '.!?':
+            score *= 1.1
+        
+        # Bonus por términos importantes
+        important_terms = self._extract_important_terms(content)
+        if important_terms:
+            score *= (1 + len(important_terms) * 0.1)
+        
+        # Bonus por estructura de lista o numeración
+        if re.search(r'(?:^|\n)[•\-\*]|\d+\.', content):
             score *= 1.2
-            
+        
+        # Bonus por presencia de definiciones o conceptos
+        if re.search(r'(?:es|son|se define|se refiere)', content.lower()):
+            score *= 1.1
+        
+        # Bonus por presencia de ejemplos
+        if re.search(r'(?:por ejemplo|ejemplo|como|tales como)', content.lower()):
+            score *= 1.1
+        
+        # Asegurar que el score no exceda 1.0
         return min(score, 1.0)
 
     def _detect_chunk_type(self, content: str) -> str:

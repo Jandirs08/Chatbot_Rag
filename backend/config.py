@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     redis_max_memory: str = Field(default="2gb", env="REDIS_MAX_MEMORY")
     
     # Configuraciones de Memoria
-    memory_type: str = Field(default="MONGO", env="MEMORY_TYPE")
+    memory_type: str = Field(default="base-memory", env="MEMORY_TYPE")
     max_memory_entries: int = Field(default=1000, env="MAX_MEMORY_ENTRIES")
     
     # Configuraciones de RAG - Procesamiento de PDFs

@@ -1,13 +1,112 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Dict
+from typing import Optional, Dict, Any, List, Tuple
 import logging
+import re
+from datetime import datetime, timezone, timedelta
+import json
+import threading
+from functools import wraps
+import spacy
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 from langchain.memory import ConversationBufferWindowMemory
-from langchain_community.chat_message_histories.in_memory import ChatMessageHistory # MODIFIED
-from langchain_core.chat_history import BaseChatMessageHistory # MODIFIED
+from langchain_community.chat_message_histories.in_memory import ChatMessageHistory
+from langchain_community.chat_message_histories.mongodb import MongoDBChatMessageHistory
+from langchain_core.chat_history import BaseChatMessageHistory
 
 from ..common.objects import MessageTurn
 from ..config import Settings, get_settings
+
+# Patrones regex para extraer información del usuario
+NAME_PATTERNS = [
+    r'me llamo (\w+)',
+    r'mi nombre es (\w+)',
+    r'soy (\w+)',
+    r'me llaman (\w+)'
+]
+
+PREFERENCE_PATTERNS = [
+    r'me gusta (?:el|la|los|las) (\w+)',
+    r'prefiero (?:el|la|los|las) (\w+)',
+    r'me interesa (?:el|la|los|las) (\w+)'
+]
+
+def log_execution(logger: logging.Logger):
+    """Decorador para logging de ejecución de métodos."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            logger.debug(f"Ejecutando {func.__name__}")
+            try:
+                result = func(*args, **kwargs)
+                logger.debug(f"{func.__name__} completado exitosamente")
+                return result
+            except Exception as e:
+                logger.error(f"Error en {func.__name__}: {str(e)}")
+                raise
+        return wrapper
+    return decorator
+
+
+class SessionContext:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.user_info: Dict[str, Any] = {}
+        self.conversation_history: List[Dict[str, Any]] = []
+        self.last_updated: datetime = datetime.now(timezone.utc)
+        self.session_start: datetime = datetime.now(timezone.utc)
+        self.is_active: bool = True
+        self.topics: List[str] = []
+        self.preferences: Dict[str, Any] = {}
+
+    def update_user_info(self, key: str, value: Any) -> None:
+        self.user_info[key] = value
+        self.last_updated = datetime.now(timezone.utc)
+        logging.debug(f"Información de usuario actualizada - {key}: {value}")
+
+    def add_to_history(self, role: str, content: str) -> None:
+        self.conversation_history.append({
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now(timezone.utc)
+        })
+        self.last_updated = datetime.now(timezone.utc)
+
+    def get_context_data(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "user_info": self.user_info,
+            "last_updated": self.last_updated.isoformat(),
+            "session_start": self.session_start.isoformat(),
+            "is_active": self.is_active,
+            "topics": self.topics,
+            "preferences": self.preferences
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "user_info": self.user_info,
+            "conversation_history": self.conversation_history,
+            "last_updated": self.last_updated.isoformat(),
+            "session_start": self.session_start.isoformat(),
+            "is_active": self.is_active,
+            "topics": self.topics,
+            "preferences": self.preferences
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SessionContext':
+        session = cls(data["session_id"])
+        session.user_info = data["user_info"]
+        session.conversation_history = data["conversation_history"]
+        session.last_updated = datetime.fromisoformat(data["last_updated"])
+        session.session_start = datetime.fromisoformat(data["session_start"])
+        session.is_active = data["is_active"]
+        session.topics = data.get("topics", [])
+        session.preferences = data.get("preferences", {})
+        return session
 
 
 class AbstractChatbotMemory(ABC):
@@ -40,11 +139,11 @@ class AbstractChatbotMemory(ABC):
     #     pass
 
 
-class BaseChatbotMemory(AbstractChatbotMemory): # Modificado para heredar
+class BaseChatbotMemory(AbstractChatbotMemory):
     def __init__(
             self,
             settings: Optional[Settings] = None,
-            chat_history_class: type[BaseChatMessageHistory] = ChatMessageHistory, # type hint más específico
+            chat_history_class: type[BaseChatMessageHistory] = ChatMessageHistory,
             memory_class=ConversationBufferWindowMemory,
             chat_history_kwargs: Optional[dict] = None,
             session_id: Optional[str] = None,
@@ -63,117 +162,251 @@ class BaseChatbotMemory(AbstractChatbotMemory): # Modificado para heredar
         :param k: Window size for ConversationBufferWindowMemory
         :param kwargs: Memory class kwargs (passed to memory_class)
         """
-        super().__init__(settings=settings, session_id=session_id, k=k, **kwargs) # Llamar al __init__ de AbstractChatbotMemory
-        
+        super().__init__(settings=settings, session_id=session_id, k=k, **kwargs)
         self.chat_history_kwargs = chat_history_kwargs or {}
-        
-        # Si se proporciona un session_id global y la clase de historial es MongoDBChatMessageHistory (o similar que lo use)
-        # y no se ha especificado un session_id en chat_history_kwargs, lo usamos.
-        # Sin embargo, la lógica de _get_or_create_conversation_memory priorizará conversation_id para Mongo.
-        if self.session_id and 'session_id' not in self.chat_history_kwargs and hasattr(chat_history_class, 'session_id'):
-             self.chat_history_kwargs['session_id'] = self.session_id
-        
         self._base_memory_class = chat_history_class
+        self._sessions: Dict[str, SessionContext] = {}
         
+        # Inicializar NLP (opcional)
+        self._nlp = None
+        try:
+            self._nlp = spacy.load("es_core_news_sm")
+            logging.info("Modelo spaCy cargado exitosamente")
+        except OSError:
+            logging.warning("Modelo spaCy no encontrado. Usando regex como fallback")
+        
+        # Configuración de MongoDB
+        try:
+            mongo_uri = self.settings.mongo_uri.get_secret_value()
+            self.mongo_client = MongoClient(mongo_uri)
+            self.db = self.mongo_client[self.settings.mongo_database_name]
+            self.sessions_collection = self.db["chat_sessions"]
+        except Exception as e:
+            logging.error(f"Error al conectar con MongoDB: {str(e)}")
+            raise
+        
+        # Configuración de memoria
         memory_params = {
             "ai_prefix": self.settings.ai_prefix,
             "human_prefix": self.settings.human_prefix,
             "memory_key": "history",
-            "k": self.k_history # Usar el k del __init__ de la clase abstracta
+            "k": self.k_history,
+            "return_messages": True
         }
-        # kwargs pasados al init de BaseChatbotMemory (que no son session_id, k, etc.)
-        # se pasan a memory_class (ConversationBufferWindowMemory)
-        memory_params.update(self._additional_kwargs) 
-
+        memory_params.update(self._additional_kwargs)
         self._memory_class_instance_template = memory_class(**memory_params)
-        self._user_memory_histories: Dict[str, BaseChatMessageHistory] = dict() # type hint más específico
-
-    @property
-    def memory_template(self):
-        return self._memory_class_instance_template
-
-    def _get_or_create_conversation_memory(self, conversation_id: str) -> ConversationBufferWindowMemory:
-        if conversation_id not in self._user_memory_histories:
-            current_chat_history_kwargs = self.chat_history_kwargs.copy()
-            
-            # Para MongoDBChatMessageHistory, el conversation_id DEBE ser el session_id.
-            # Esta lógica asegura que cada conversación tenga su propio historial aislado en Mongo.
-            # Importar aquí para evitar dependencia cíclica o error si no se usa
-            from langchain_community.chat_message_histories.mongodb import MongoDBChatMessageHistory
-            if issubclass(self._base_memory_class, MongoDBChatMessageHistory):
-                if current_chat_history_kwargs.get('session_id') != conversation_id:
-                    self.logger.debug(f"Forcing session_id to conversation_id ('{conversation_id}') for MongoDBChatMessageHistory.")
-                current_chat_history_kwargs['session_id'] = conversation_id
-            elif self.session_id and 'session_id' not in current_chat_history_kwargs and hasattr(self._base_memory_class, 'session_id'):
-                # Para otras clases de historial que usan session_id, pero no son MongoDBChatMessageHistory
-                # (aunque es raro), usamos el session_id global si está disponible.
-                current_chat_history_kwargs['session_id'] = self.session_id
-
-            chat_history_instance = self._base_memory_class(**current_chat_history_kwargs)
-            self._user_memory_histories[conversation_id] = chat_history_instance
+        self._user_memory_histories: Dict[str, BaseChatMessageHistory] = dict()
         
-        specific_memory_instance = ConversationBufferWindowMemory(
-            chat_memory=self._user_memory_histories[conversation_id],
-            ai_prefix=self.memory_template.ai_prefix,
-            human_prefix=self.memory_template.human_prefix,
-            memory_key=self.memory_template.memory_key,
-            k=self.memory_template.k,
-            input_key=self.memory_template.input_key if hasattr(self.memory_template, 'input_key') else None,
-            output_key=self.memory_template.output_key if hasattr(self.memory_template, 'output_key') else None
-        )
-        return specific_memory_instance
+        # Iniciar limpieza de sesiones inactivas
+        self._start_session_cleanup()
 
-    def clear(self, conversation_id: str):
-        if conversation_id in self._user_memory_histories:
-            history_instance = self._user_memory_histories.pop(conversation_id)
-            if hasattr(history_instance, 'clear'): # MongoDBChatMessageHistory tiene clear()
-                try:
-                    history_instance.clear()
-                    self.logger.info(f"Cleared history for conversation_id: {conversation_id} from underlying ChatMessageHistory.")
-                except Exception as e:
-                    self.logger.error(f"Error clearing history from ChatMessageHistory for {conversation_id}: {e}")
-            else:
-                 self.logger.info(f"ChatMessageHistory for {conversation_id} does not have a clear method. Removed from in-memory cache.")
+    def _start_session_cleanup(self):
+        """Inicia el proceso de limpieza de sesiones inactivas."""
+        def cleanup_task():
+            while True:
+                self._clean_inactive_sessions()
+                threading.Event().wait(1800)  # Esperar 30 minutos
+        
+        cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
+        cleanup_thread.start()
+
+    def _clean_inactive_sessions(self):
+        """Limpia sesiones inactivas."""
+        try:
+            inactive_threshold = datetime.now(timezone.utc) - timedelta(minutes=30)
+            for session_id, session in list(self._sessions.items()):
+                if session.last_updated < inactive_threshold:
+                    self.clear(session_id)
+                    logging.info(f"Sesión inactiva limpiada: {session_id}")
+        except Exception as e:
+            logging.error(f"Error al limpiar sesiones inactivas: {str(e)}")
+
+    def _extract_user_info(self, message: str) -> Dict[str, Any]:
+        """Extrae información del usuario usando NLP o regex como fallback."""
+        info = {}
+        
+        if self._nlp:
+            # Usar NLP si está disponible
+            doc = self._nlp(message.lower())
+            
+            # Extraer nombres
+            for ent in doc.ents:
+                if ent.label_ == "PER":
+                    info["nombre"] = ent.text
+                    break
+            
+            # Extraer preferencias
+            for token in doc:
+                if token.dep_ == "dobj" and token.head.pos_ == "VERB":
+                    if token.head.lemma_ in ["gustar", "preferir", "interesar"]:
+                        info["preferencias"] = token.text
+            
+            # Extraer temas
+            for token in doc:
+                if token.pos_ == "NOUN" and token.dep_ in ["nsubj", "dobj"]:
+                    if "topics" not in info:
+                        info["topics"] = []
+                    info["topics"].append(token.text)
         else:
-            self.logger.info(f"No history found to clear for conversation_id: {conversation_id}")
+            # Usar regex como fallback
+            message_lower = message.lower()
+            
+            # Extraer nombre
+            for pattern in NAME_PATTERNS:
+                if match := re.search(pattern, message_lower):
+                    info["nombre"] = match.group(1)
+                    break
+            
+            # Extraer preferencias
+            for pattern in PREFERENCE_PATTERNS:
+                if match := re.search(pattern, message_lower):
+                    info["preferencias"] = match.group(1)
+                    break
+        
+        return info
 
-    def load_history(self, conversation_id: str) -> str:
-        specific_memory = self._get_or_create_conversation_memory(conversation_id)
-        loaded_vars = specific_memory.load_memory_variables({})
-        history_str = loaded_vars.get(specific_memory.memory_key, "")
-        self.logger.debug(f"Loaded history for {conversation_id}: {history_str[:200]}...")
-        return history_str
+    @log_execution(logging.getLogger(__name__))
+    def store_message_in_memory(self, conversation_id: str, role: str, content: str) -> None:
+        """Almacena un mensaje en la memoria."""
+        try:
+            session = self._get_or_create_session(conversation_id)
+            specific_memory = self._get_or_create_conversation_memory(conversation_id)
+            
+            if role == "user":
+                specific_memory.chat_memory.add_user_message(content)
+                user_info = self._extract_user_info(content)
+                for key, value in user_info.items():
+                    if key == "topics":
+                        session.topics.extend(value)
+                    elif key == "preferencias":
+                        session.preferences[key] = value
+                    else:
+                        session.update_user_info(key, value)
+            else:
+                specific_memory.chat_memory.add_ai_message(content)
+            
+            session.add_to_history(role, content)
+            self._save_session_to_db(session)
+            
+        except Exception as e:
+            logging.error(f"Error al almacenar mensaje: {str(e)}")
+            raise
 
+    @log_execution(logging.getLogger(__name__))
     def add_message(self, message_turn: MessageTurn):
-        if not message_turn or not message_turn.conversation_id:
-            self.logger.error("Cannot add message: MessageTurn or conversation_id is missing.")
+        """Añade un mensaje a la conversación."""
+        if not self._validate_message_turn(message_turn):
             return
 
-        conversation_id = message_turn.conversation_id
-        specific_memory = self._get_or_create_conversation_memory(conversation_id)
-        
-        # Accedemos a chat_memory (que es una instancia de BaseChatMessagesHistory) para añadir mensajes
-        if message_turn.human_message and hasattr(message_turn.human_message, 'message') and message_turn.human_message.message:
-            specific_memory.chat_memory.add_user_message(message_turn.human_message.message)
-        
-        if message_turn.ai_message and hasattr(message_turn.ai_message, 'message') and message_turn.ai_message.message:
-            specific_memory.chat_memory.add_ai_message(message_turn.ai_message.message)
-        
-        self.logger.debug(f"Added message turn to conversation {conversation_id}")
+        try:
+            if message_turn.human_message and hasattr(message_turn.human_message, 'message'):
+                self.store_message_in_memory(
+                    message_turn.conversation_id,
+                    "user",
+                    message_turn.human_message.message
+                )
+            
+            if message_turn.ai_message and hasattr(message_turn.ai_message, 'message'):
+                self.store_message_in_memory(
+                    message_turn.conversation_id,
+                    "assistant",
+                    message_turn.ai_message.message
+                )
+                
+        except Exception as e:
+            logging.error(f"Error al procesar mensaje: {str(e)}")
+            raise
+
+    def _validate_message_turn(self, message_turn: MessageTurn) -> bool:
+        """Valida la estructura del mensaje."""
+        if not message_turn or not message_turn.conversation_id:
+            logging.error("MessageTurn inválido o sin conversation_id")
+            return False
+        return True
+
+    @log_execution(logging.getLogger(__name__))
+    def load_history(self, conversation_id: str) -> str:
+        """Carga el historial de la conversación."""
+        try:
+            specific_memory = self._get_or_create_conversation_memory(conversation_id)
+            session = self._get_or_create_session(conversation_id)
+            
+            loaded_vars = specific_memory.load_memory_variables({})
+            history_str = loaded_vars.get(specific_memory.memory_key, "")
+            
+            context_data = session.get_context_data()
+            if context_data:
+                history_str = f"{json.dumps(context_data, ensure_ascii=False)}\n\n{history_str}"
+            
+            return history_str
+            
+        except Exception as e:
+            logging.error(f"Error al cargar historial: {str(e)}")
+            return ""
+
+    def _save_session_to_db(self, session: SessionContext) -> None:
+        """Guarda la sesión en la base de datos."""
+        try:
+            self.sessions_collection.update_one(
+                {"session_id": session.session_id},
+                {"$set": session.to_dict()},
+                upsert=True
+            )
+        except PyMongoError as e:
+            logging.error(f"Error al guardar sesión en DB: {str(e)}")
+            raise
+
+    def _load_session_from_db(self, session_id: str) -> Optional[SessionContext]:
+        """Carga una sesión desde la base de datos."""
+        try:
+            session_data = self.sessions_collection.find_one({"session_id": session_id})
+            if session_data:
+                return SessionContext.from_dict(session_data)
+        except PyMongoError as e:
+            logging.error(f"Error al cargar sesión desde DB: {str(e)}")
+            raise
+        return None
+
+    def _get_or_create_session(self, conversation_id: str) -> SessionContext:
+        """Obtiene o crea una sesión."""
+        if conversation_id not in self._sessions:
+            # Intentar cargar desde DB
+            session = self._load_session_from_db(conversation_id)
+            if not session:
+                session = SessionContext(conversation_id)
+            self._sessions[conversation_id] = session
+        return self._sessions[conversation_id]
+
+    @log_execution(logging.getLogger(__name__))
+    def clear(self, conversation_id: str):
+        """Limpia la memoria y sesión."""
+        try:
+            # Limpiar memoria
+            if conversation_id in self._user_memory_histories:
+                history_instance = self._user_memory_histories.pop(conversation_id)
+                if hasattr(history_instance, 'clear'):
+                    history_instance.clear()
+            
+            # Limpiar sesión
+            if conversation_id in self._sessions:
+                del self._sessions[conversation_id]
+            
+            # Eliminar de DB
+            self.sessions_collection.delete_one({"session_id": conversation_id})
+            
+        except Exception as e:
+            logging.error(f"Error al limpiar conversación: {str(e)}")
+            raise
 
     def get_langchain_memory_instance(self, conversation_id: str) -> Optional[ConversationBufferWindowMemory]:
-        """Devuelve la instancia de Langchain ConversationBufferWindowMemory para un conversation_id específico."""
-        if not conversation_id:
-            self.logger.warning("get_langchain_memory_instance called without conversation_id")
-            return None
         return self._get_or_create_conversation_memory(conversation_id)
 
-    def get_chat_history_instance(self, conversation_id: str) -> Optional[BaseChatMessageHistory]: # type hint más específico
-        """Devuelve la instancia subyacente de BaseChatMessagesHistory (ej. MongoDBChatMessageHistory)."""
-        if conversation_id in self._user_memory_histories:
-            return self._user_memory_histories[conversation_id]
-        self.logger.debug(f"No underlying chat history instance found for conversation_id: {conversation_id}")
-        return None
+    def get_chat_history_instance(self, conversation_id: str) -> Optional[BaseChatMessageHistory]:
+        return self._user_memory_histories.get(conversation_id)
+
+    def get_context_data(self, conversation_id: str) -> Dict[str, Any]:
+        session = self._get_or_create_session(conversation_id)
+        return session.get_context_data()
 
 # Ejemplo de cómo podría ser una clase de historial muy simple para pruebas (no para producción)
 # from langchain.schema import BaseMessage, HumanMessage, AIMessage
@@ -194,3 +427,4 @@ class BaseChatbotMemory(AbstractChatbotMemory): # Modificado para heredar
 #         self.add_message(AIMessage(content=message))
 #     def clear(self) -> None:
 #         self.messages = []
+
