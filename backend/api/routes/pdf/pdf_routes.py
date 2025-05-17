@@ -1,0 +1,144 @@
+"""API routes for PDF management."""
+import logging
+import datetime
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request, BackgroundTasks
+from typing import List
+
+# Importar modelos Pydantic
+from .schemas import ( # Cambio aquí: ...schemas -> .schemas
+    PDFListResponse, 
+    PDFUploadResponse, 
+    PDFDeleteResponse,
+    PDFListItem
+)
+
+# Remove Pydantic v1
+# from pydantic import BaseModel 
+
+# from ..utils.pdf_utils import PDFProcessor # Se inyectará desde el estado de la app
+# from ..rag.retrieval.retriever import RAGRetriever # Se inyectará desde el estado de la app
+
+# from ...common.rate_limiter import rate_limit # Comentado temporalmente
+# from ...common.cache import cache_response # Comentado temporalmente
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/pdfs", tags=["PDFs"])
+
+# class PDFUploadResponse(BaseModel):
+#     status: str
+#     message: str
+#     file_path: str
+#     pdfs_in_directory: list[str]
+
+# class PDFListResponse(BaseModel):
+#     pdfs: list[dict]
+
+# class PDFDeleteResponse(BaseModel):
+#     status: str
+#     message: str
+
+@router.post("/upload", response_model=PDFUploadResponse)
+# @rate_limit(max_requests=10, window_seconds=60) # Comentado temporalmente
+async def upload_pdf(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+):
+    """Endpoint para subir y procesar PDFs de forma asíncrona."""
+    pdf_file_manager = request.app.state.pdf_file_manager
+    rag_ingestor = request.app.state.rag_ingestor
+    
+    try:
+        # Validar tamaño del archivo
+        file_size = 0
+        chunk_size = 1024 * 1024  # 1MB
+        while chunk := await file.read(chunk_size):
+            file_size += len(chunk)
+            if file_size > request.app.state.settings.max_file_size_mb * 1024 * 1024:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Archivo excede el tamaño máximo permitido de {request.app.state.settings.max_file_size_mb}MB"
+                )
+        await file.seek(0)
+        
+        # Guardar archivo
+        file_path = await pdf_file_manager.save_pdf(file)
+        
+        # Procesar PDF en segundo plano
+        background_tasks.add_task(rag_ingestor.ingest_single_pdf, file_path)
+        
+        # Listar PDFs actualizados
+        pdfs_in_dir = await pdf_file_manager.list_pdfs()
+        
+        return PDFUploadResponse(
+            message="PDF subido exitosamente. El procesamiento continuará en segundo plano.",
+            file_path=str(file_path),
+            pdfs_in_directory=[p["filename"] for p in pdfs_in_dir]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al procesar PDF: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno del servidor al procesar PDF: {str(e)}"
+        )
+
+@router.get("/list", response_model=PDFListResponse)
+# @cache_response(expire=60)  # Cache por 1 minuto # Comentado temporalmente
+# @rate_limit(max_requests=30, window_seconds=60) # Comentado temporalmente
+async def list_pdfs(request: Request):
+    """Endpoint para listar los PDFs disponibles."""
+    pdf_file_manager = request.app.state.pdf_file_manager
+    try:
+        pdfs_raw = await pdf_file_manager.list_pdfs()
+        pdf_list_items = [
+            PDFListItem(
+                filename=p["filename"],
+                path=str(p["path"]),
+                size=p["size"],
+                last_modified=datetime.datetime.fromtimestamp(p["last_modified"])
+            ) for p in pdfs_raw
+        ]
+        return PDFListResponse(pdfs=pdf_list_items)
+    except Exception as e:
+        logger.error(f"Error al listar PDFs: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno del servidor al listar PDFs: {str(e)}"
+        )
+
+@router.delete("/{filename}", response_model=PDFDeleteResponse)
+# @rate_limit(max_requests=10, window_seconds=60) # Comentado temporalmente
+async def delete_pdf(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    filename: str
+):
+    """Endpoint para eliminar un PDF específico."""
+    pdf_file_manager = request.app.state.pdf_file_manager
+    rag_ingestor = request.app.state.rag_ingestor
+    
+    try:
+        # Eliminar archivo del sistema de archivos
+        await pdf_file_manager.delete_pdf(filename)
+        
+        # Eliminar documentos asociados del vector store en segundo plano
+        # Asumiendo que los documentos tienen metadata {"source": filename}
+        background_tasks.add_task(
+            rag_ingestor.vector_store.delete_documents, 
+            filter={"source": filename}
+        )
+        
+        return PDFDeleteResponse(
+            message=f"PDF '{filename}' eliminado exitosamente. La actualización del índice continuará en segundo plano."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al eliminar PDF '{filename}': {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno del servidor al eliminar PDF: {str(e)}"
+        ) 
