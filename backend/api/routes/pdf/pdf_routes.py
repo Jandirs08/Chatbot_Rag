@@ -22,7 +22,7 @@ from .schemas import ( # Cambio aquí: ...schemas -> .schemas
 # from ...common.cache import cache_response # Comentado temporalmente
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/pdfs", tags=["PDFs"])
+router = APIRouter(tags=["PDFs"])
 
 # class PDFUploadResponse(BaseModel):
 #     status: str

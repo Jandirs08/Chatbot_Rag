@@ -58,15 +58,16 @@ class RAGIngestor:
             Diccionario con resultados de la ingesta.
         """
         filename = pdf_path.name
-        logger.info(f"Iniciando ingesta de: {filename}")
+        logger.info(f"🚀 Iniciando procesamiento del PDF: {filename}")
         
         try:
             # Verificar archivo
             if not pdf_path.exists() or not pdf_path.is_file():
-                return self._error_result(filename, "Archivo no encontrado")
+                return self._error_result(filename, "❌ Archivo no encontrado")
             
             # Verificar si ya está procesado
             if not force_update and await self._is_already_processed(pdf_path):
+                logger.info(f"⏭️ PDF {filename} ya procesado anteriormente. Omitiendo.")
                 return {
                     "filename": filename,
                     "status": "skipped",
@@ -76,12 +77,16 @@ class RAGIngestor:
             # Procesar PDF
             chunks = self.pdf_content_loader.load_and_split_pdf(pdf_path)
             if not chunks:
-                return self._error_result(filename, "No se generaron chunks")
+                return self._error_result(filename, "❌ No se pudo extraer contenido del PDF")
+            
+            logger.info(f"📄 PDF procesado: {len(chunks)} fragmentos de texto extraídos")
             
             # Deduplicar chunks
             unique_chunks, unique_embeddings = await self._deduplicate_chunks(chunks, return_embeddings=True)
             if not unique_chunks:
-                return self._error_result(filename, "No quedaron chunks después de deduplicación")
+                return self._error_result(filename, "❌ No quedaron fragmentos después de eliminar duplicados")
+            
+            logger.info(f"🔄 Fragmentos únicos después de deduplicación: {len(unique_chunks)}")
             
             # Procesar en lotes
             total_added = 0
@@ -96,20 +101,22 @@ class RAGIngestor:
                     if not isinstance(batch, list):
                         raise TypeError(f"Batch is not a list before adding to vector store. Type: {type(batch)}")
                     if not batch:
-                        logger.warning(f"Batch is empty before adding to vector store. Skipping batch {i//self.batch_size + 1}.")
+                        logger.warning(f"⚠️ Lote vacío. Omitiendo lote {i//self.batch_size + 1}.")
                         continue
-                    logger.debug(f"Calling _add_batch_to_vector_store for batch {i//self.batch_size + 1}.")
+                    
                     try:
                         await self._add_batch_to_vector_store(batch, i//self.batch_size + 1, embeddings=batch_embeddings)
                         total_added += len(batch)
-                        logger.info(f"Lote {i//self.batch_size + 1} procesado: {len(batch)} chunks")
+                        logger.info(f"✅ Lote {i//self.batch_size + 1} procesado: {len(batch)} fragmentos agregados al vector store")
                     except Exception as add_err:
-                        logger.error(f"Error procesando lote {i//self.batch_size + 1} en vector store: {add_err}", exc_info=True)
+                        logger.error(f"❌ Error procesando lote {i//self.batch_size + 1}: {add_err}", exc_info=True)
                 except Exception as e:
-                    logger.error(f"Error en lote {i//self.batch_size + 1}: {str(e)}", exc_info=True)
+                    logger.error(f"❌ Error en lote {i//self.batch_size + 1}: {str(e)}", exc_info=True)
             
             # Actualizar hashes procesados
             self._update_processed_hashes(unique_chunks)
+            
+            logger.info(f"✨ Procesamiento completado para {filename}: {total_added} fragmentos agregados al vector store")
             
             return {
                 "filename": filename,
