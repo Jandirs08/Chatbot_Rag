@@ -1,7 +1,8 @@
 """FastAPI application for the chatbot."""
 import os # Necesario para getenv
 import logging # Necesario para configurar logging
-from fastapi import FastAPI
+import time
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -139,30 +140,52 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """Create the FastAPI application."""
     # Configurar logging (debe hacerse antes si otros módulos loggean al importarse)
-    # No, settings ya se importa, así que esto debería estar bien aquí.
     logging.basicConfig(
-        level=settings.log_level.upper(), # Logging level debe ser en mayúsculas
+        level=settings.log_level.upper(),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    main_logger = logging.getLogger(__name__) # Logger para create_app
+    main_logger = logging.getLogger(__name__)
     main_logger.info("Creando instancia de FastAPI...")
 
-    # Verificar OpenAI API key (u otras configuraciones críticas)
-    if settings.model_type == "OPENAI" and not settings.openai_api_key: # Usar settings
+    # Verificar OpenAI API key
+    if settings.model_type == "OPENAI" and not settings.openai_api_key:
         main_logger.error("Error Crítico: OpenAI API key (OPENAI_API_KEY) no está configurada en las settings o el entorno para el modelo OPENAI.")
         raise ValueError("OpenAI API key es requerida para el modelo OPENAI y no está configurada.")
-    
-    # Cargar settings (ya se hizo arriba para logging, pero bien tenerlo aquí para el app)
-    # app_settings = get_settings() # Ya tenemos 'settings' importado globalmente en el módulo
     
     app = FastAPI(
         title=settings.app_title or "LangChain Chatbot API",
         description=settings.app_description or "API for the LangChain chatbot",
         version=settings.app_version or "1.0.0",
-        lifespan=lifespan # Pasar la función lifespan
+        lifespan=lifespan
     )
-    
+
+    # Middleware para logging de peticiones
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        start_time = time.time()
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        
+        # Obtener el cuerpo de la petición si existe
+        body = None
+        try:
+            body = await request.body()
+            if body:
+                body = body.decode()
+        except:
+            pass
+
+        main_logger.info(
+            f"Request: {request.method} {request.url.path} - "
+            f"Status: {response.status_code} - "
+            f"Time: {process_time:.2f}s - "
+            f"Body: {body if body else 'No body'}"
+        )
+        
+        return response
+
+    # Configurar CORS
     cors_origins_setting = settings.cors_origins
     if cors_origins_setting:
         allow_origins_list = []
@@ -183,7 +206,6 @@ def create_app() -> FastAPI:
         )
         main_logger.info(f"CORS configurado para orígenes: {allow_origins_list}")
     else:
-        # Default a permitir todo si no se especifica (para desarrollo)
         app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],
@@ -191,22 +213,18 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-        main_logger.info("CORS configurado para permitir todos los orígenes (default). Es recomendable especificar cors_origins en producción.")
-    
-    # Registrar routers
-    # Asegúrate que las rutas de importación de los routers sean correctas
-    # Por ejemplo, si están en un subdirectorio api/routes/
-    # from .routes import health_router, pdf_router, rag_router, chat_router
-    
-    # Usando las importaciones ya hechas arriba:
-    app.include_router(health_router, prefix="/api/v1", tags=["Health"])
-    app.include_router(pdf_router, prefix="/api/v1", tags=["PDFs"])
-    app.include_router(rag_router, prefix="/api/v1", tags=["RAG"])
-    app.include_router(chat_router, prefix="/api/v1", tags=["Chat"])
-    main_logger.info("Routers registrados.")
+        main_logger.info("CORS configurado para permitir todos los orígenes (default).")
 
+    # Registrar routers
+    app.include_router(health_router, prefix="/api/v1", tags=["health"])
+    app.include_router(pdf_router, prefix="/api/v1/pdfs", tags=["pdfs"])
+    app.include_router(rag_router, prefix="/api/v1/rag", tags=["rag"])
+    app.include_router(chat_router, prefix="/api/v1/chat", tags=["chat"])
+    
+    main_logger.info("Routers registrados.")
     main_logger.info("Aplicación FastAPI creada y configurada exitosamente.")
-    return app 
+    
+    return app
 
 # --- Creación de la instancia global de la aplicación --- 
 # Esto permite que Uvicorn la encuentre si se ejecuta este archivo directamente (aunque es mejor usar main.py)

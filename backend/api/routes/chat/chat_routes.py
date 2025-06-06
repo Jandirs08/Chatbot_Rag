@@ -20,7 +20,7 @@ from .schemas import ( # Cambio aquí: ...schemas -> .schemas
 # from ..rag.retrieval.retriever import RAGRetriever # Se inyectará desde el estado de la app
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/chat")
+router = APIRouter()
 
 @router.post("/stream_log")
 async def chat_stream_log(request: Request):

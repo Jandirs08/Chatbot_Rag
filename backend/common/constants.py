@@ -5,8 +5,8 @@ ANONYMIZED_FIELDS = ['US_BANK_NUMBER', 'US_DRIVER_LICENSE', 'US_ITIN', 'US_PASSP
 NLP_CONFIG = {
     "nlp_engine_name": "spacy",
     "models": [
-        {"lang_code": "en", "model_name": "en_core_web_md"}
-    ],
+        {"lang_code": "es", "model_name": "es_core_news_sm"}
+    ]
 }
 PERSONAL_CHAT_PROMPT_REACT = "SHELDON_REACT_PROMPT"
 PERSONAL_CHAT_PROMPT = "SHELDON_REACT_PROMPT"
