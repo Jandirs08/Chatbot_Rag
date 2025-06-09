@@ -1,9 +1,11 @@
 "use client";
 
-import { ChatWindow } from "../app/components/ChatWindow";
-import { ToastContainer } from "react-toastify";
-import { v4 as uuidv4 } from "uuid";
+import { ChatWindow } from "./components/ChatWindow";
 import { ChakraProvider } from "@chakra-ui/react";
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+
+import { v4 as uuidv4 } from "uuid";
 
 export default function Home() {
   const conversationId = uuidv4();

@@ -112,3 +112,15 @@ li {
 ::-webkit-scrollbar-thumb:hover {
   background: #718096;
 }
+
+/* Añadir al final del archivo */
+@keyframes slideInChat {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

@@ -15,8 +15,8 @@ export function EmptyState(props: { onChoice: (question: string) => any }) {
   };
   return (
     <div className="rounded flex flex-col items-center max-w-full md:p-1">
-      <Heading fontSize="6xl" fontWeight={"medium"} mb={1} color={"white"}>
-        🔥 Personality Chatbot 🔥
+      <Heading fontSize="2xl" fontWeight={"medium"} mb={1} color={"white"}>
+        Becas Grupo Romero
       </Heading>
     </div>
   );
