@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 import { useState } from "react";
 import {
   Card,
@@ -12,22 +12,14 @@ import { Input } from "@/app/components/ui/input";
 import { Label } from "@/app/components/ui/label";
 import { Copy, Eye, MessageCircle } from "lucide-react";
 import { useToast } from "@/app/hooks/use-toast";
+import { FloatingChatWidget } from "./FloatingChatWidget";
 
 export function WidgetPreview() {
   const widgetUrl =
-    process.env.VITE_WIDGET_URL || "https://widget.becas-grupo-romero.com/chat";
-  const [iframeCode, setIframeCode] = useState(
-    `<iframe src="${widgetUrl}" width="400" height="600" frameborder="0" style="position: fixed; bottom: 20px; right: 20px; z-index: 1000; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.1);"></iframe>`,
-  );
-  const { toast } = useToast();
+    process.env.NEXT_PUBLIC_VITE_WIDGET_URL ||
+    "https://widget.becas-grupo-romero.com/chat";
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(iframeCode);
-    toast({
-      title: "Código copiado",
-      description: "El código del iframe ha sido copiado al portapapeles",
-    });
-  };
+  const { toast } = useToast();
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -54,6 +46,7 @@ export function WidgetPreview() {
           <CardContent>
             <div className="relative bg-gradient-to-br from-muted/30 to-secondary/10 p-8 rounded-lg min-h-[400px] border border-border/30">
               {/* Simulación de una página web */}
+
               <div className="space-y-4 text-sm text-muted-foreground">
                 <div className="h-4 bg-muted rounded w-3/4"></div>
                 <div className="h-4 bg-muted rounded w-1/2"></div>
@@ -62,9 +55,9 @@ export function WidgetPreview() {
                 <div className="h-4 bg-muted rounded w-2/3"></div>
               </div>
 
-              {/* Widget flotante simulado */}
-              <div className="absolute bottom-4 right-4 w-16 h-16 rounded-full gradient-primary flex items-center justify-center shadow-lg hover:scale-110 transition-transform cursor-pointer">
-                <MessageCircle className="w-8 h-8 text-white" />
+              {/* Directamente renderizar FloatingChatWidget */}
+              <div className="absolute bottom-4 right-4">
+                <FloatingChatWidget />
               </div>
             </div>
           </CardContent>
@@ -87,53 +80,12 @@ export function WidgetPreview() {
               <div className="relative mt-2">
                 <textarea
                   id="iframe-code"
-                  value={iframeCode}
-                  onChange={(e) => setIframeCode(e.target.value)}
+                  value={widgetUrl}
                   className="w-full h-32 p-3 text-sm border border-border rounded-md bg-background font-mono resize-none"
                   readOnly
                 />
-                <Button
-                  size="sm"
-                  onClick={copyToClipboard}
-                  className="absolute top-2 right-2 gradient-primary hover:opacity-90"
-                >
-                  <Copy className="w-4 h-4" />
-                </Button>
               </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="width">Ancho (px)</Label>
-                <Input
-                  id="width"
-                  type="number"
-                  defaultValue="400"
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="height">Alto (px)</Label>
-                <Input
-                  id="height"
-                  type="number"
-                  defaultValue="600"
-                  className="mt-1"
-                />
-              </div>
-            </div>
-
-            <Button
-              className="w-full gradient-primary hover:opacity-90"
-              onClick={() =>
-                toast({
-                  title: "Vista previa actualizada",
-                  description: "Los cambios se han aplicado a la vista previa",
-                })
-              }
-            >
-              Actualizar Vista Previa
-            </Button>
           </CardContent>
         </Card>
       </div>

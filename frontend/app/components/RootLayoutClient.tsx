@@ -1,30 +1,38 @@
 "use client";
 
 import { AppSidebar } from "./AppSidebar";
-import { SidebarProvider, useSidebar } from "./ui/sidebar"; // Import useSidebar
+import { SidebarProvider, SidebarTrigger, useSidebar } from "./ui/sidebar"; // Import useSidebar
 import { Button } from "./ui/button"; // Import Button
 import { PanelLeft } from "lucide-react"; // Import PanelLeft icon
 import { Toaster } from "./ui/toaster"; // Import Toaster component
+import { usePathname } from "next/navigation"; // Import usePathname
 
 export function RootLayoutClient({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider>
       <RootLayoutContent>{children}</RootLayoutContent>
-      <Toaster /> {/* Add Toaster component here */}
+      <Toaster />
     </SidebarProvider>
   );
 }
 
 // Nuevo componente interno para acceder al contexto del sidebar
 function RootLayoutContent({ children }: { children: React.ReactNode }) {
-  const { toggleSidebar, state } = useSidebar();
+  const pathname = usePathname();
+  const isChatRoute = pathname === "/chat";
 
   return (
     <div className="flex h-full bg-background">
-      <AppSidebar />
+      {!isChatRoute && <AppSidebar />}
       <div className="flex-1 flex flex-col">
-        {/* Eliminado: El header con el botón de colapso que agregamos */}
-        <main className="flex-1 p-4">{children}</main>
+        {!isChatRoute && (
+          <div className="ml-2 mt-5">
+            <SidebarTrigger className="text-primary hover:text-accent transition-colors" />
+          </div>
+        )}
+        <main className={`flex-1 ${isChatRoute ? "p-0" : "p-4"}`}>
+          {children}
+        </main>
       </div>
     </div>
   );

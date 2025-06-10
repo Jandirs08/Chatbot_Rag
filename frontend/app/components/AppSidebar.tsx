@@ -1,6 +1,14 @@
 "use client";
 
-import { Bot, FileText, Settings, BarChart3, Code, User } from "lucide-react";
+import {
+  Bot,
+  FileText,
+  Settings,
+  BarChart3,
+  Code,
+  User,
+  MessageCircle,
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -12,13 +20,18 @@ import {
   SidebarMenuItem,
   SidebarHeader,
   useSidebar,
-} from "@/components/ui/sidebar";
+} from "./ui/sidebar";
 
 const menuItems = [
   {
     title: "Dashboard",
     url: "/",
     icon: BarChart3,
+  },
+  {
+    title: "Chat",
+    url: "/chat",
+    icon: MessageCircle,
   },
   {
     title: "Widget",

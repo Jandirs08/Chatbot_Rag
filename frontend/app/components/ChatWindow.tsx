@@ -240,94 +240,78 @@ export function ChatWindow(props: {
   };
 
   return (
-    <div className="flex flex-col items-center p-4 md:p-8 rounded grow max-h-full bg-gradient-to-b from-gray-900 to-gray-800">
-      {memoizedMessages.length > 0 && (
-        <Flex
-          direction={"column"}
-          alignItems={"center"}
-          paddingBottom={"20px"}
-          width="100%"
-        >
-          <Flex justifyContent="space-between" width="100%" mb={4}>
-            <Heading
-              fontSize={["3xl", "4xl", "5xl"]}
-              fontWeight={"medium"}
-              mb={1}
-              color={"white"}
-              className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500"
-            >
-              🔥 {titleText} 🔥
-            </Heading>
-            <Button
-              leftIcon={<DeleteIcon />}
-              colorScheme="red"
-              variant="outline"
-              onClick={clearConversation}
-              _hover={{ bg: "rgba(255, 0, 0, 0.1)" }}
-            >
-              Limpiar Chat
-            </Button>
-          </Flex>
-        </Flex>
-      )}
+    <div className="flex flex-col h-full w-full bg-gradient-to-b from-gray-900 to-gray-800 p-4">
+      {/* Header */}
+      <Flex justifyContent="space-between" width="100%" mb={4}>
+        <Heading fontSize={["3xl", "4xl", "5xl"]} fontWeight={"medium"} mb={1}>
+          {/* {titleText} */}
+        </Heading>
+        {memoizedMessages.length > 0 && (
+          <IconButton
+            icon={<DeleteIcon />}
+            aria-label="Clear Conversation"
+            onClick={clearConversation}
+            colorScheme="whiteAlpha"
+          />
+        )}
+      </Flex>
 
-      <div
-        ref={messageContainerRef}
-        className="flex flex-col gap-4 w-full max-w-4xl h-[calc(100vh-280px)] overflow-y-auto px-4 transition-all duration-300 ease-in-out scroll-smooth"
-        style={{
-          scrollbarWidth: "thin",
-          scrollbarColor: "#4A5568 #2D3748",
-        }}
-      >
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-y-auto w-full" ref={messageContainerRef}>
         {memoizedMessages.length > 0 ? (
-          memoizedMessages.map((message) => (
-            <div key={message.id} className="mb-4 w-full">
+          <div className="flex flex-col gap-4 w-full">
+            {memoizedMessages.map((m, i) => (
               <ChatMessageBubble
-                message={message}
+                key={m.id}
+                message={m}
                 aiEmoji="🔥"
-                isMostRecent={
-                  message.id ===
-                  memoizedMessages[memoizedMessages.length - 1].id
-                }
+                isMostRecent={i === memoizedMessages.length - 1}
                 messageCompleted={!isLoading}
               />
-            </div>
-          ))
+            ))}
+            {isLoading && (
+              <ChatMessageBubble
+                message={{
+                  id: uuidv4(),
+                  content: "...",
+                  role: "assistant",
+                }}
+                isMostRecent={true}
+                messageCompleted={false}
+              />
+            )}
+          </div>
         ) : (
           <EmptyState onChoice={sendInitialQuestion} />
         )}
       </div>
-      <InputGroup size="md" alignItems={"center"}>
+
+      {/* Input Group */}
+      <InputGroup size="md" className="w-full mt-4">
         <AutoResizeTextarea
           value={input}
-          maxRows={5}
-          rounded={"full"}
-          marginRight={"56px"}
-          placeholder={placeholder ?? "What is your name?"}
-          textColor={"white"}
-          borderColor={"rgb(58, 58, 61)"}
           onChange={(e) => setInput(e.target.value)}
+          placeholder={placeholder ?? "What is your name?"}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               sendMessage();
-            } else if (e.key === "Enter" && e.shiftKey) {
-              e.preventDefault();
-              setInput(input + "\n");
             }
           }}
+          maxRows={5}
+          pr="5rem"
+          textColor="white"
         />
-        <InputRightElement h="full">
+        <InputRightElement height="100%" right="0.5rem">
           <IconButton
             colorScheme="blue"
-            rounded={"full"}
-            aria-label="Send"
-            icon={isLoading ? <Spinner /> : <ArrowUpIcon />}
-            type="submit"
-            onClick={(e) => {
-              e.preventDefault();
-              sendMessage();
-            }}
+            aria-label="Send message"
+            icon={<ArrowUpIcon />}
+            onClick={() => sendMessage()}
+            isDisabled={isLoading}
+            width="2.5rem"
+            height="2.5rem"
+            borderRadius="full"
           />
         </InputRightElement>
       </InputGroup>
