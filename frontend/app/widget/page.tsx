@@ -1,6 +1,6 @@
 "use client";
-import { Layout } from "@/components/Layout";
-import { WidgetPreview } from "@/components/WidgetPreview";
+import { Layout } from "@/app/components/Layout";
+import { WidgetPreview } from "@/app/components/WidgetPreview";
 
 export default function Widget() {
   return (
