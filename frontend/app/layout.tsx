@@ -1,12 +1,13 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { RootLayoutClient } from "./components/RootLayoutClient";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Personality Chatbot",
-  description: "Chatbot",
+  title: "Panel de Control del Chatbot",
+  description: "Panel de administración para el chatbot personalizado",
 };
 
 export default function RootLayout({
@@ -15,14 +16,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full">
+    <html lang="es" className="h-full">
       <body className={`${inter.className} h-full`}>
-        <div
-          className="flex flex-col h-full md:p-8"
-          style={{ background: "rgb(38, 38, 41)" }}
-        >
-          {children}
-        </div>
+        <RootLayoutClient>{children}</RootLayoutClient>
       </body>
     </html>
   );
