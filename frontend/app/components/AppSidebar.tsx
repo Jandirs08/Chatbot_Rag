@@ -11,7 +11,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarHeader,
-  SidebarProvider,
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 const menuItems = [
@@ -43,48 +43,49 @@ const menuItems = [
 ];
 
 export function AppSidebar() {
+  const { state } = useSidebar();
   return (
-    <SidebarProvider>
-      <Sidebar className="border-r border-border/50">
-        <SidebarHeader className="p-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center">
-              <Bot className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-foreground">RAG Bot</h2>
-              <p className="text-sm text-muted-foreground">
-                Becas Grupo Romero
-              </p>
-            </div>
+    <Sidebar className="border-r border-border/50">
+      <SidebarHeader className="p-6">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center">
+            <Bot className="w-6 h-6 text-white" />
           </div>
-        </SidebarHeader>
+          <div className={state === "collapsed" ? "hidden" : ""}>
+            <h2 className="text-lg font-bold text-foreground">RAG Bot</h2>
+            <p className="text-sm text-muted-foreground">Becas Grupo Romero</p>
+          </div>
+        </div>
+      </SidebarHeader>
 
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-primary font-semibold">
-              Gestión del Bot
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {menuItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      className="hover:bg-primary/10 hover:text-primary transition-all duration-200"
-                    >
-                      <a href={item.url} className="flex items-center gap-3">
-                        <item.icon className="w-5 h-5" />
-                        <span>{item.title}</span>
-                      </a>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-      </Sidebar>
-    </SidebarProvider>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel
+            className={
+              state === "collapsed" ? "hidden" : "text-primary font-semibold"
+            }
+          >
+            Gestión del Bot
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {menuItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    className="hover:bg-primary/10 hover:text-primary transition-all duration-200"
+                  >
+                    <a href={item.url} className="flex items-center gap-3">
+                      <item.icon className="w-5 h-5" />
+                      {state !== "collapsed" && <span>{item.title}</span>}
+                    </a>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
   );
 }

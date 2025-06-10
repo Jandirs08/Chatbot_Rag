@@ -1,7 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { AppSidebar } from "./components/AppSidebar";
+import { RootLayoutClient } from "./components/RootLayoutClient";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -18,12 +18,7 @@ export default function RootLayout({
   return (
     <html lang="es" className="h-full">
       <body className={`${inter.className} h-full`}>
-        <div className="flex h-full" style={{ background: "rgb(38, 38, 41)" }}>
-          <AppSidebar />
-          <div className="flex-1 md:ml-[var(--sidebar-width)] p-4">
-            {children}
-          </div>
-        </div>
+        <RootLayoutClient>{children}</RootLayoutClient>
       </body>
     </html>
   );
