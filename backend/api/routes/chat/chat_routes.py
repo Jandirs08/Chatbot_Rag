@@ -27,7 +27,16 @@ async def chat_stream_log(request: Request):
     """Endpoint para chat con streaming y logging."""
     chat_manager = request.app.state.chat_manager
     rag_retriever = request.app.state.rag_retriever
+    bot = request.app.state.bot_instance
+    
     try:
+        # Verificar si el bot está activo
+        if not bot.is_active:
+            raise HTTPException(
+                status_code=503,
+                detail="El bot está desactivado actualmente"
+            )
+            
         data = await request.json()
         # Validar con Pydantic ChatRequest si queremos ser estrictos con la entrada
         try:

@@ -66,6 +66,7 @@ class Bot:
         )
         
         self.start_agent()
+        self.is_active = True  # Por defecto el bot está activo
 
     @property
     def memory(self) -> AbstractChatbotMemory:

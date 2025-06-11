@@ -16,15 +16,44 @@ import {
   Users,
   MessageCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { botService } from "./lib/services/botService";
+import { toast } from "sonner";
 
 export default function Dashboard() {
   const [isBotActive, setIsBotActive] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handleBotToggle = (checked: boolean) => {
-    setIsBotActive(checked);
-    // TODO: Aquí se conectará con el backend para guardar el estado
-    console.log("Bot state changed:", checked);
+  useEffect(() => {
+    const fetchBotState = async () => {
+      try {
+        const state = await botService.getState();
+        setIsBotActive(state.is_active);
+      } catch (error) {
+        console.error("Error al obtener el estado del bot:", error);
+        toast.error("Error al obtener el estado del bot");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchBotState();
+  }, []);
+
+  const handleBotToggle = async (checked: boolean) => {
+    try {
+      setIsLoading(true);
+      const state = await botService.toggleState();
+      setIsBotActive(state.is_active);
+      toast.success(state.message);
+    } catch (error) {
+      console.error("Error al cambiar el estado del bot:", error);
+      toast.error("Error al cambiar el estado del bot");
+      // Revertir el estado en caso de error
+      setIsBotActive(!checked);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const stats = [
@@ -107,6 +136,7 @@ export default function Dashboard() {
               <Switch
                 checked={isBotActive}
                 onCheckedChange={handleBotToggle}
+                disabled={isLoading}
                 className="data-[state=checked]:bg-green-500"
               />
             </div>
