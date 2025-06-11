@@ -1,4 +1,3 @@
-import React from "react";
 import { useState } from "react";
 import {
   Card,
@@ -10,16 +9,43 @@ import {
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { Label } from "@/app/components/ui/label";
-import { Copy, Eye, MessageCircle } from "lucide-react";
-import { useToast } from "@/app/hooks/use-toast";
-import { FloatingChatWidget } from "./FloatingChatWidget";
+import { Copy, Eye, MessageCircle, X } from "lucide-react";
+import { useToast } from "@/app/components/ui/use-toast";
 
 export function WidgetPreview() {
-  const widgetUrl =
-    process.env.NEXT_PUBLIC_VITE_WIDGET_URL ||
-    "https://widget.becas-grupo-romero.com/chat";
-
+  const [width, setWidth] = useState("400");
+  const [height, setHeight] = useState("600");
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [iframeCode, setIframeCode] = useState(
+    `<iframe src="${process.env.NEXT_PUBLIC_VITE_WIDGET_URL}" width="${width}" height="${height}" frameborder="0" style="position: fixed; bottom: 20px; right: 20px; z-index: 1000; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.1);"></iframe>`,
+  );
   const { toast } = useToast();
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(iframeCode);
+    toast({
+      title: "Código copiado",
+      description: "El código del iframe ha sido copiado al portapapeles",
+    });
+  };
+
+  const updateIframeCode = (newWidth: string, newHeight: string) => {
+    setIframeCode(
+      `<iframe src="${process.env.NEXT_PUBLIC_VITE_WIDGET_URL}" width="${newWidth}" height="${newHeight}" frameborder="0" style="position: fixed; bottom: 20px; right: 20px; z-index: 1000; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.1);"></iframe>`,
+    );
+  };
+
+  const handleWidthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newWidth = e.target.value;
+    setWidth(newWidth);
+    updateIframeCode(newWidth, height);
+  };
+
+  const handleHeightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newHeight = e.target.value;
+    setHeight(newHeight);
+    updateIframeCode(width, newHeight);
+  };
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -46,19 +72,55 @@ export function WidgetPreview() {
           <CardContent>
             <div className="relative bg-gradient-to-br from-muted/30 to-secondary/10 p-8 rounded-lg min-h-[400px] border border-border/30">
               {/* Simulación de una página web */}
+              {!isPreviewOpen && (
+                <div className="space-y-4 text-sm text-muted-foreground">
+                  <div className="h-4 bg-muted rounded w-3/4"></div>
+                  <div className="h-4 bg-muted rounded w-1/2"></div>
+                  <div className="h-4 bg-muted rounded w-5/6"></div>
+                  <div className="h-16 bg-muted rounded"></div>
+                  <div className="h-4 bg-muted rounded w-2/3"></div>
+                </div>
+              )}
 
-              <div className="space-y-4 text-sm text-muted-foreground">
-                <div className="h-4 bg-muted rounded w-3/4"></div>
-                <div className="h-4 bg-muted rounded w-1/2"></div>
-                <div className="h-4 bg-muted rounded w-5/6"></div>
-                <div className="h-16 bg-muted rounded"></div>
-                <div className="h-4 bg-muted rounded w-2/3"></div>
-              </div>
+              {/* Widget flotante simulado */}
+              {!isPreviewOpen && (
+                <div
+                  className="absolute bottom-4 right-4 w-16 h-16 rounded-full gradient-primary flex items-center justify-center shadow-lg hover:scale-110 transition-transform cursor-pointer"
+                  onClick={() => setIsPreviewOpen(true)}
+                >
+                  <MessageCircle className="w-8 h-8 text-white" />
+                </div>
+              )}
 
-              {/* Directamente renderizar FloatingChatWidget */}
-              <div className="absolute bottom-4 right-4">
-                <FloatingChatWidget />
-              </div>
+              {/* Vista previa del iframe */}
+              {isPreviewOpen && (
+                <div
+                  className="absolute inset-0 flex items-center justify-center z-50"
+                  style={{ width: "100%", height: "100%" }}
+                >
+                  <div
+                    className="relative"
+                    style={{ width: `${width}px`, height: `${height}px` }}
+                  >
+                    <iframe
+                      src={process.env.NEXT_PUBLIC_VITE_WIDGET_URL}
+                      width={width}
+                      height={height}
+                      style={{
+                        border: "none",
+                        borderRadius: "16px",
+                        boxShadow: "0 8px 32px rgba(0,0,0,0.1)",
+                      }}
+                    />
+                    <button
+                      onClick={() => setIsPreviewOpen(false)}
+                      className="absolute -top-2 -right-2 w-8 h-8 rounded-full bg-destructive text-white flex items-center justify-center shadow-md z-50 hover:bg-destructive/90 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -80,12 +142,55 @@ export function WidgetPreview() {
               <div className="relative mt-2">
                 <textarea
                   id="iframe-code"
-                  value={widgetUrl}
+                  value={iframeCode}
+                  onChange={(e) => setIframeCode(e.target.value)}
                   className="w-full h-32 p-3 text-sm border border-border rounded-md bg-background font-mono resize-none"
                   readOnly
                 />
+                <Button
+                  size="sm"
+                  onClick={copyToClipboard}
+                  className="absolute top-2 right-2 gradient-primary hover:opacity-90"
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
               </div>
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="width">Ancho (px)</Label>
+                <Input
+                  id="width"
+                  type="number"
+                  value={width}
+                  onChange={handleWidthChange}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="height">Alto (px)</Label>
+                <Input
+                  id="height"
+                  type="number"
+                  value={height}
+                  onChange={handleHeightChange}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
+            <Button
+              className="w-full gradient-primary hover:opacity-90"
+              onClick={() =>
+                toast({
+                  title: "Vista previa actualizada",
+                  description: "Los cambios se han aplicado a la vista previa",
+                })
+              }
+            >
+              Actualizar Vista Previa
+            </Button>
           </CardContent>
         </Card>
       </div>
