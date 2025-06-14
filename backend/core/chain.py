@@ -191,6 +191,12 @@ class ChainManager:
             else:
                 output_content = str(llm_output)
             
+            # Limpiar la respuesta de cualquier formato de prompt
+            if "Final Answer:" in output_content:
+                output_content = output_content.split("Final Answer:")[-1].strip()
+            if "Tu respuesta final y completa" in output_content:
+                output_content = output_content.split("Tu respuesta final y completa")[-1].strip()
+            
             return Message(message=output_content, role="assistant")
             
         except Exception as e:

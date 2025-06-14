@@ -24,7 +24,7 @@ from ..common.objects import Message, MessageTurn
 from ..common.constants import *
 from .chain import ChainManager
 from . import prompt as prompt_module
-from ..utils import BotAnonymizer, CacheTypes, ChatbotCache
+from ..utils import CacheTypes, ChatbotCache
 from ..tools import CustomSearchTool
 from ..config import Settings, get_settings
 
@@ -38,8 +38,11 @@ class Bot:
             cache: Optional[CacheTypes] = None,
             model_type: Optional[ModelTypes] = None
     ):
-        self.settings = settings
-        self.logger = logging.getLogger(self.__class__.__name__)  # Add logger initialization
+        self.settings = settings if settings is not None else get_settings()
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
+        # Initialize cache
+        self.cache = ChatbotCache(settings=self.settings)
         
         self._memory: AbstractChatbotMemory = self.get_memory(
             memory_type=memory_type,
@@ -49,7 +52,6 @@ class Bot:
             self.logger.warning("GPTCache solo es compatible con modelos OpenAI. Desactivando caché.")
             cache = None
         self._cache = ChatbotCache.create(cache_type=cache)
-        self.anonymizer = BotAnonymizer(settings=self.settings)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.agent_executor: Optional[AgentExecutor] = None
         
@@ -96,13 +98,7 @@ class Bot:
 
         agent_chain_with_history = history_loader | agent_runnable_core
 
-        if self.settings.enable_anonymizer:
-            anonymizer_runnable = self.anonymizer.get_runnable_anonymizer().with_config(run_name="AnonymizeSentence")
-            de_anonymizer = RunnableLambda(self.anonymizer.anonymizer.deanonymize).with_config(run_name="DeAnonymizeResponse")
-            self.logger.warning("La integración del anonimizador con AgentExecutor necesita revisión. Omitiéndolo por ahora del ensamblaje del agente.")
-            runnable_for_agent = agent_chain_with_history
-        else:
-            runnable_for_agent = agent_chain_with_history
+        runnable_for_agent = agent_chain_with_history
 
         self.agent_executor = AgentExecutor(
             agent=runnable_for_agent | ReActSingleInputOutputParser(),
