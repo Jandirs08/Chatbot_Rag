@@ -1,36 +1,29 @@
 """FastAPI application for the chatbot."""
-import os # Necesario para getenv
-import logging # Necesario para configurar logging
+import logging
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from ..config import get_settings, settings # Importar settings directamente también si se usa para logging
+from ..config import get_settings, settings
 from ..chat.manager import ChatManager
 from ..rag.retrieval.retriever import RAGRetriever
-# Asegurarse de que la ruta de importación es correcta después de mover pdf_utils.py
-# from ..utils.pdf_utils import PDFProcessor # Ruta antigua
-from ..file_system.pdf_file_manager import PDFFileManager # Nueva ruta y nombre
+from ..file_system.pdf_file_manager import PDFFileManager
 
-# --- Importar Routers --- 
-# Ajusta estas rutas si la estructura de tus routers es diferente.
-from .health_check_routes import router as health_router # Corregido: .health_check_routes
-# Suponiendo que cada subdirectorio en api/routes/ tiene un archivo router.py que define 'router'
-# Si el archivo se llama diferente (ej. api/routes/pdf/main.py), ajusta la importación.
+# Importar Routers
+from .routes.health.health_routes import router as health_router
 from .routes.pdf.pdf_routes import router as pdf_router
 from .routes.rag.rag_routes import router as rag_router
 from .routes.chat.chat_routes import router as chat_router
 from .routes.bot.bot_routes import router as bot_router
 
-# Dependencias para inicializar managers (ejemplo, deben ajustarse a la refactorización previa)
+# Dependencias para inicializar managers
 from ..core.bot import Bot
-from ..memory import MemoryTypes, MEM_TO_CLASS # Para configurar el Bot con memoria
+from ..memory import MemoryTypes
 from ..rag.pdf_processor.pdf_loader import PDFContentLoader
 from ..rag.embeddings.embedding_manager import EmbeddingManager
-# Asumiendo que VectorStore es la clase base o una específica como ChromaVectorStore
-from ..rag.vector_store.vector_store import VectorStore # Asumiendo que es ChromaVectorStore o similar
+from ..rag.vector_store.vector_store import VectorStore
 from ..rag.ingestion.ingestor import RAGIngestor
 
 @asynccontextmanager
@@ -96,8 +89,6 @@ async def lifespan(app: FastAPI):
         )
         logger.info("ChatManager inicializado.")
 
-        logger.info("Todos los managers y procesadores inicializados y disponibles en app.state.")
-
     except Exception as e:
         logger.error(f"Error fatal durante la inicialización en lifespan: {e}", exc_info=True)
         raise
@@ -109,28 +100,19 @@ async def lifespan(app: FastAPI):
         # Cerrar ChatManager
         if hasattr(app.state, 'chat_manager'):
             if hasattr(app.state.chat_manager, 'close'):
-                if asyncio.iscoroutinefunction(app.state.chat_manager.close):
-                    await app.state.chat_manager.close()
-                else:
-                    app.state.chat_manager.close()
+                await app.state.chat_manager.close()
             logger.info("ChatManager cerrado.")
 
         # Cerrar VectorStore
         if hasattr(app.state, 'vector_store'):
             if hasattr(app.state.vector_store, 'close'):
-                if asyncio.iscoroutinefunction(app.state.vector_store.close):
-                    await app.state.vector_store.close()
-                else:
-                    app.state.vector_store.close()
+                await app.state.vector_store.close()
             logger.info("VectorStore cerrado.")
 
         # Cerrar EmbeddingManager
         if hasattr(app.state, 'embedding_manager'):
             if hasattr(app.state.embedding_manager, 'close'):
-                if asyncio.iscoroutinefunction(app.state.embedding_manager.close):
-                    await app.state.embedding_manager.close()
-                else:
-                    app.state.embedding_manager.close()
+                await app.state.embedding_manager.close()
             logger.info("EmbeddingManager cerrado.")
 
     except Exception as e:
@@ -140,7 +122,6 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create the FastAPI application."""
-    # Configurar logging (debe hacerse antes si otros módulos loggean al importarse)
     logging.basicConfig(
         level=settings.log_level.upper(),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -149,10 +130,9 @@ def create_app() -> FastAPI:
     main_logger = logging.getLogger(__name__)
     main_logger.info("Creando instancia de FastAPI...")
 
-    # Verificar OpenAI API key
     if settings.model_type == "OPENAI" and not settings.openai_api_key:
-        main_logger.error("Error Crítico: OpenAI API key (OPENAI_API_KEY) no está configurada en las settings o el entorno para el modelo OPENAI.")
-        raise ValueError("OpenAI API key es requerida para el modelo OPENAI y no está configurada.")
+        main_logger.error("Error Crítico: OpenAI API key no está configurada.")
+        raise ValueError("OpenAI API key es requerida para el modelo OPENAI.")
     
     app = FastAPI(
         title=settings.app_title or "LangChain Chatbot API",
@@ -161,14 +141,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan
     )
 
-    # Middleware para logging de peticiones
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
         start_time = time.time()
         response = await call_next(request)
         process_time = time.time() - start_time
         
-        # Obtener el cuerpo de la petición si existe
         body = None
         try:
             body = await request.body()
@@ -197,24 +175,17 @@ def create_app() -> FastAPI:
         else:
             main_logger.warning(f"cors_origins tiene un tipo inesperado: {type(cors_origins_setting)}. Usando default ['*'].")
             allow_origins_list = ["*"]
-            
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=allow_origins_list,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-        main_logger.info(f"CORS configurado para orígenes: {allow_origins_list}")
     else:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-        main_logger.info("CORS configurado para permitir todos los orígenes (default).")
+        allow_origins_list = ["*"]
+            
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allow_origins_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    main_logger.info(f"CORS configurado para orígenes: {allow_origins_list}")
 
     # Registrar routers
     app.include_router(health_router, prefix="/api/v1", tags=["health"])

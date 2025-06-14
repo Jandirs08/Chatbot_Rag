@@ -3,7 +3,7 @@ import logging
 import uuid
 import json
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
@@ -27,11 +27,9 @@ router = APIRouter()
 async def chat_stream_log(request: Request):
     """Endpoint para chat con streaming y logging."""
     chat_manager = request.app.state.chat_manager
-    rag_retriever = request.app.state.rag_retriever
     bot = request.app.state.bot_instance
     
     try:
-        # Verificar si el bot está activo
         if not bot.is_active:
             raise HTTPException(
                 status_code=503,
@@ -39,7 +37,6 @@ async def chat_stream_log(request: Request):
             )
             
         data = await request.json()
-        # Validar con Pydantic ChatRequest si queremos ser estrictos con la entrada
         try:
             chat_input = ChatRequest(**data)
         except Exception as pydantic_error:
@@ -47,44 +44,27 @@ async def chat_stream_log(request: Request):
             raise HTTPException(status_code=422, detail=f"Cuerpo de la solicitud inválido: {pydantic_error}")
 
         input_text = chat_input.input
-        conversation_id = chat_input.conversation_id or str(uuid.uuid4()) # Usar el default de Pydantic o generar uno
+        conversation_id = chat_input.conversation_id or str(uuid.uuid4())
         
         if not input_text:
-            # ChatRequest ya lo valida con Field(..., description="User message")
             raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
         
         logger.info(f"Recibida solicitud de chat: '{input_text}' para conversación {conversation_id}")
         
-        # La lógica de RAG (retrieve_documents y format_context) ahora está dentro de ChatManager.generate_response
-        # por lo que no es necesario hacerlo aquí.
-        # relevant_docs = await rag_retriever.retrieve_documents(input_text)
-        # logger.info(f"Documentos relevantes encontrados: {len(relevant_docs)}")
-        # context = rag_retriever.format_context_from_documents(relevant_docs)
-        # logger.info(f"Contexto formateado: {len(context)} caracteres")
-        
-        # Llamar a ChatManager solo con input_text y conversation_id
         response_content = await chat_manager.generate_response(input_text, conversation_id)
         logger.info("Respuesta generada por ChatManager")
         
-        # Construir el objeto StreamEventData
         response_data_obj = StreamEventData(
             streamed_output=response_content,
-            # ops no se usa en esta implementación simple de stream, LangServe los añade.
-            # Si esta ruta debe emular LangServe, se necesitaría más lógica aquí.
-            # Por ahora, se omite 'ops' o se deja None según el modelo Pydantic.
             ops=None 
         )
         
         async def generate():
             try:
-                # Enviar respuesta inicial (en formato de evento Server-Sent Event)
                 yield f"data: {response_data_obj.model_dump_json()}\n\n"
-                # Enviar evento de finalización
                 yield "event: end\ndata: {}\n\n"
             except Exception as e_stream:
                 logger.error(f"Error en streaming: {str(e_stream)}", exc_info=True)
-                # Para errores durante el stream, es difícil enviar un JSONResponse normal.
-                # Se podría enviar un evento de error dentro del stream.
                 error_event_data = StreamEventData(
                     streamed_output="Lo siento, hubo un error al procesar tu solicitud durante el streaming.",
                     ops=None
@@ -104,12 +84,9 @@ async def chat_stream_log(request: Request):
         
     except HTTPException as http_exc:
         logger.error(f"Error HTTP en chat_stream_log: {http_exc.detail}")
-        raise # Re-lanzar para que FastAPI la maneje como JSONResponse
+        raise
     except Exception as e:
         logger.error(f"Error general en chat_stream_log: {str(e)}", exc_info=True)
-        # Para errores antes de iniciar el stream, se puede devolver JSONResponse
-        # Esto requiere que el import de JSONResponse esté presente.
-        from fastapi.responses import JSONResponse # Importación local para este bloque
         return JSONResponse(
             status_code=500,
             content={"detail": f"Error interno del servidor en chat: {str(e)}"}
@@ -132,35 +109,24 @@ async def clear_history(request: Request, conversation_id: str):
 
 @router.get("/export-conversations")
 async def export_conversations(request: Request):
-    """
-    Exporta todas las conversaciones a un archivo Excel.
-    Todas las conversaciones se muestran en una sola hoja, agrupadas por conversation_id.
-    """
+    """Exporta todas las conversaciones a un archivo Excel."""
     try:
-        # Usar la instancia de MongoDB del chat_manager
         chat_manager = request.app.state.chat_manager
         db = chat_manager.db
         
-        # Obtener todas las conversaciones
         cursor = db.messages.find({}).sort([("conversation_id", 1), ("timestamp", 1)])
         messages = await cursor.to_list(length=None)
         
         if not messages:
             raise HTTPException(status_code=404, detail="No se encontraron conversaciones para exportar")
         
-        # Crear DataFrame con los mensajes
         df = pd.DataFrame(messages)
-        
-        # Crear un archivo Excel en memoria
         output = BytesIO()
+        
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Ordenar por conversation_id y timestamp
             df = df.sort_values(['conversation_id', 'timestamp'])
-            
-            # Formatear timestamp
             df['timestamp'] = pd.to_datetime(df['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
             
-            # Renombrar columnas
             df = df.rename(columns={
                 'conversation_id': 'ID Conversación',
                 'timestamp': 'Fecha y Hora',
@@ -168,17 +134,12 @@ async def export_conversations(request: Request):
                 'content': 'Mensaje'
             })
             
-            # Reordenar columnas
             df = df[['ID Conversación', 'Fecha y Hora', 'Rol', 'Mensaje']]
-            
-            # Escribir en una sola hoja
             df.to_excel(writer, sheet_name='Conversaciones', index=False)
             
-            # Obtener el workbook y la hoja
             workbook = writer.book
             worksheet = writer.sheets['Conversaciones']
             
-            # Definir formatos
             header_format = workbook.add_format({
                 'bold': True,
                 'bg_color': '#D9E1F2',
@@ -195,40 +156,30 @@ async def export_conversations(request: Request):
                 'text_wrap': True
             })
             
-            # Aplicar formato al encabezado
             for col_num, value in enumerate(df.columns.values):
                 worksheet.write(0, col_num, value, header_format)
             
-            # Aplicar formatos a las celdas
             current_conversation = None
             for row_num, row in enumerate(df.itertuples(), start=1):
-                # Si es una nueva conversación, aplicar formato de conversación
                 if row[1] != current_conversation:
                     current_conversation = row[1]
                     worksheet.write(row_num, 0, row[1], conversation_format)
                 else:
                     worksheet.write(row_num, 0, row[1], message_format)
                 
-                # Escribir el resto de las columnas
                 worksheet.write(row_num, 1, row[2], message_format)
                 worksheet.write(row_num, 2, row[3], message_format)
                 worksheet.write(row_num, 3, row[4], message_format)
             
-            # Ajustar ancho de columnas
-            worksheet.set_column('A:A', 36)  # ID Conversación
-            worksheet.set_column('B:B', 20)  # Fecha y Hora
-            worksheet.set_column('C:C', 10)  # Rol
-            worksheet.set_column('D:D', 100)  # Mensaje
+            worksheet.set_column('A:A', 36)
+            worksheet.set_column('B:B', 20)
+            worksheet.set_column('C:C', 10)
+            worksheet.set_column('D:D', 100)
             
-            # Agregar filtros
             worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
-            
-            # Congelar la primera fila
             worksheet.freeze_panes(1, 0)
         
         output.seek(0)
-        
-        # Generar nombre de archivo con fecha actual
         current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f'conversaciones_{current_time}.xlsx'
         

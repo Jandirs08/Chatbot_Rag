@@ -12,30 +12,9 @@ from ...schemas import (
     PDFListItem
 )
 
-# Remove Pydantic v1
-# from pydantic import BaseModel 
-
-# from ..utils.pdf_utils import PDFProcessor # Se inyectará desde el estado de la app
-# from ..rag.retrieval.retriever import RAGRetriever # Se inyectará desde el estado de la app
-
-# from ...common.rate_limiter import rate_limit # Comentado temporalmente
-# from ...common.cache import cache_response # Comentado temporalmente
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["pdfs"])
-
-# class PDFUploadResponse(BaseModel):
-#     status: str
-#     message: str
-#     file_path: str
-#     pdfs_in_directory: list[str]
-
-# class PDFListResponse(BaseModel):
-#     pdfs: list[dict]
-
-# class PDFDeleteResponse(BaseModel):
-#     status: str
-#     message: str
 
 @router.post("/upload", response_model=PDFUploadResponse)
 # @rate_limit(max_requests=10, window_seconds=60) # Comentado temporalmente

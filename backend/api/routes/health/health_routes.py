@@ -1,9 +1,7 @@
 """Health check routes for the API."""
 from fastapi import APIRouter, status
-from ..config import get_settings
-
-# Importar modelo Pydantic
-from .schemas import HealthResponse
+from ....config import get_settings
+from ....api.schemas.health import HealthResponse
 
 router = APIRouter()
 

@@ -44,12 +44,3 @@ class MessageTurn(BaseModel):
 # class ChatRequest(BaseModel): # Eliminado: Redundante con api/schemas.py
 #     input: str = Field(..., description="User message")
 #     conversation_id: Optional[str] = Field(default="default", description="Conversation ID")
-
-
-def messages_from_dict(message: dict) -> str:
-    human_message = message["human_message"]
-    ai_message = message["ai_message"]
-
-    human_message = Message(message=human_message["message"], role=human_message["role"])
-    ai_message = Message(message=ai_message["message"], role=ai_message["role"])
-    return f"{human_message.role}: {human_message.message}\n{ai_message.role}: {ai_message.message}"
