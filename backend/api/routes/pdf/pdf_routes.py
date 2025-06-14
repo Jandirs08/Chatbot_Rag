@@ -4,8 +4,8 @@ import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Request, BackgroundTasks
 from typing import List
 
-# Importar modelos Pydantic
-from .schemas import ( # Cambio aquí: ...schemas -> .schemas
+# Importar modelos Pydantic desde el módulo centralizado
+from ...schemas import (
     PDFListResponse, 
     PDFUploadResponse, 
     PDFDeleteResponse,

@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException, Request
 # from ..utils.pdf_utils import PDFProcessor # Se inyectará desde el estado de la app
 # from ..rag.retrieval.retriever import RAGRetriever # Se inyectará desde el estado de la app
 
-# Importar modelos Pydantic
-from .schemas import ( # Cambio aquí: ...schemas -> .schemas
+# Importar modelos Pydantic desde el módulo centralizado
+from ...schemas import (
     RAGStatusResponse,
     ClearRAGResponse,
     RAGStatusPDFDetail,

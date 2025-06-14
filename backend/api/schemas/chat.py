@@ -1,6 +1,9 @@
-"""API Schema for Chat routes."""
+"""Chat-related schemas."""
+
 from typing import Optional, List, Any
 from pydantic import BaseModel, Field
+
+from .base import BaseResponse
 
 class ChatRequest(BaseModel):
     """Chat request model."""
@@ -13,14 +16,16 @@ class ChatResponse(BaseModel):
     conversation_id: str = Field(..., description="Conversation ID")
 
 class StreamEventOp(BaseModel):
+    """Model for streaming event operations."""
     op: str
     path: str
     value: Any
 
 class StreamEventData(BaseModel):
+    """Model for streaming event data."""
     streamed_output: str
     ops: Optional[List[StreamEventOp]] = None
 
-class ClearHistoryResponse(BaseModel):
-    status: str = "success"
-    message: str 
+class ClearHistoryResponse(BaseResponse):
+    """Response model for clear history endpoint."""
+    pass 

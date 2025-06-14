@@ -8,15 +8,11 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime
 
-# Importar modelos Pydantic
-from .schemas import ( # Cambio aquí: ...schemas -> .schemas
-    # ChatRequest se usaría si el body se parseara con Pydantic antes,
-    # pero aquí se lee data = await request.json() directamente.
-    # Para consistencia, podríamos definir un ChatStreamRequest si el input es complejo.
-    # Por ahora, se mantiene la lectura directa del JSON.
-    StreamEventData, # Para la estructura DENTRO del stream
-    ClearHistoryResponse,
-    ChatRequest # Para validación de la entrada del endpoint de stream si se decide usarlo
+# Importar modelos Pydantic desde el módulo centralizado
+from ...schemas import (
+    ChatRequest,
+    StreamEventData,
+    ClearHistoryResponse
 )
 
 from ....database.mongodb import MongodbClient

@@ -18,11 +18,11 @@ class PDFFileManager:
         """Inicializa el gestor de archivos PDF.
         
         Args:
-            base_dir: Directorio base desde donde se calculará la ruta de pdf_dir.
+            base_dir: Directorio base donde están los PDFs.
             max_workers: Número máximo de workers para operaciones paralelas.
         """
-        effective_base_dir = base_dir or Path(__file__).resolve().parent.parent.parent 
-        self.pdf_dir = effective_base_dir / "data" / "pdfs"
+        effective_base_dir = base_dir or Path(__file__).resolve().parent.parent.parent
+        self.pdf_dir = effective_base_dir
         self.max_workers = max_workers
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self._ensure_directories()

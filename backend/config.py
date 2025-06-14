@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     max_concurrent_tasks: int = Field(default=4, env="MAX_CONCURRENT_TASKS")
     
     # Configuraciones de RAG - Vector Store
-    vector_store_path: str = Field(default="./backend/data/vector_store/chroma_db")
+    vector_store_path: str = Field(default="./backend/storage/vector_store/chroma_db")
     distance_strategy: str = Field(default="cosine", env="DISTANCE_STRATEGY")
     
     # Configuraciones de RAG - Embeddings
@@ -103,9 +103,12 @@ class Settings(BaseSettings):
     max_cache_size: int = Field(default=1000, env="MAX_CACHE_SIZE")
     
     # Configuraciones de Directorios
-    base_data_dir: str = Field(default="./backend/data_storage", env="BASE_DATA_DIR")
-    temp_dir: str = Field(default="./temp", env="TEMP_DIR")
-    backup_dir: str = Field(default="./backups", env="BACKUP_DIR")
+    storage_dir: str = Field(default="./backend/storage", env="STORAGE_DIR")
+    documents_dir: str = Field(default="./backend/storage/documents", env="DOCUMENTS_DIR")
+    pdfs_dir: str = Field(default="./backend/storage/documents/pdfs", env="PDFS_DIR")
+    cache_dir: str = Field(default="./backend/storage/cache", env="CACHE_DIR")
+    temp_dir: str = Field(default="./backend/storage/temp", env="TEMP_DIR")
+    backup_dir: str = Field(default="./backend/storage/backups", env="BACKUP_DIR")
     
     # Configuraciones de Monitoreo
     enable_metrics: bool = Field(default=True, env="ENABLE_METRICS")
