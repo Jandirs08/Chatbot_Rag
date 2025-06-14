@@ -25,7 +25,6 @@ from ..common.constants import *
 from .chain import ChainManager
 from . import prompt as prompt_module
 from ..utils import CacheTypes, ChatbotCache
-from ..tools import CustomSearchTool
 from ..config import Settings, get_settings
 
 
@@ -57,8 +56,6 @@ class Bot:
         
         # Inicializar tools
         self.tools = []
-        if self.settings.serpapi_api_key:
-            self.tools.append(CustomSearchTool(api_key=self.settings.serpapi_api_key.get_secret_value()))
         
         # Inicializar chain_manager
         self.chain_manager = ChainManager(

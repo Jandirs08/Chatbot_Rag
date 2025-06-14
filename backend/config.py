@@ -45,7 +45,6 @@ class Settings(BaseSettings):
     # Configuraciones del Modelo
     model_type: str = Field(default="OPENAI", env="MODEL_TYPE")
     openai_api_key: SecretStr = Field(..., env="OPENAI_API_KEY")
-    serpapi_api_key: Optional[SecretStr] = Field(default=None, env="SERPAPI_API_KEY")
     base_model_name: str = Field(default="gpt-3.5-turbo", env="BASE_MODEL_NAME")
     max_tokens: int = Field(default=2000, env="MAX_TOKENS")
     temperature: float = Field(default=0.7, env="TEMPERATURE")
