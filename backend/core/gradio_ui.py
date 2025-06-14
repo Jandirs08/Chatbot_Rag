@@ -3,7 +3,7 @@ import random
 
 import gradio as gr
 
-from bot import Bot
+from .bot import Bot
 from memory import MemoryTypes
 from models import ModelTypes
 from utils import CacheTypes

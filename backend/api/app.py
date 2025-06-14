@@ -25,7 +25,7 @@ from .routes.chat.chat_routes import router as chat_router
 from .routes.bot.bot_routes import router as bot_router
 
 # Dependencias para inicializar managers (ejemplo, deben ajustarse a la refactorización previa)
-from ..bot import Bot
+from ..core.bot import Bot
 from ..memory import MemoryTypes, MEM_TO_CLASS # Para configurar el Bot con memoria
 from ..rag.pdf_processor.pdf_loader import PDFContentLoader
 from ..rag.embeddings.embedding_manager import EmbeddingManager

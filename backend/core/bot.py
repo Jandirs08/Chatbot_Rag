@@ -12,21 +12,21 @@ from langchain.agents.format_scratchpad import format_log_to_str
 from langchain.agents.output_parsers import ReActSingleInputOutputParser
 # from langchain_core.tracers.context import wait_for_all_tracers # COMMENTED OUT
 
-from .memory import (
+from ..memory import (
     MemoryTypes, 
     MEM_TO_CLASS, 
     AbstractChatbotMemory,
     BaseChatbotMemory,  # Asegurar que esta importación esté presente
     CustomMongoChatbotMemory
 )
-from .models import ModelTypes
-from .common.objects import Message, MessageTurn
-from .common.constants import *
+from ..models import ModelTypes
+from ..common.objects import Message, MessageTurn
+from ..common.constants import *
 from .chain import ChainManager
 from . import prompt as prompt_module
-from .utils import BotAnonymizer, CacheTypes, ChatbotCache
-from .tools import CustomSearchTool
-from .config import Settings, get_settings
+from ..utils import BotAnonymizer, CacheTypes, ChatbotCache
+from ..tools import CustomSearchTool
+from ..config import Settings, get_settings
 
 
 class Bot:

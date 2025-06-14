@@ -11,7 +11,7 @@ from ..database.mongodb import MongodbClient
 from ..common.constants import USER_ROLE, ASSISTANT_ROLE
 from ..common.objects import Message as BotMessage
 from ..rag.retrieval.retriever import RAGRetriever
-from ..bot import Bot
+from ..core.bot import Bot
 
 logger = logging.getLogger(__name__)
 
