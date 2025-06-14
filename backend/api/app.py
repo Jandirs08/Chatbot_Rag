@@ -9,7 +9,7 @@ from pathlib import Path
 from ..config import get_settings, settings
 from ..chat.manager import ChatManager
 from ..rag.retrieval.retriever import RAGRetriever
-from ..storage.documents import PDFManager
+from ..storage.documents.pdf_manager import PDFManager
 
 # Importar Routers
 from .routes.health.health_routes import router as health_router

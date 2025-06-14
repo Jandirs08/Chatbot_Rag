@@ -1,7 +1,8 @@
 """API routes for RAG management."""
 import logging
-import datetime # Para convertir timestamp
+import datetime
 from fastapi import APIRouter, HTTPException, Request
+from pathlib import Path
 
 # from ..utils.pdf_utils import PDFProcessor # Se inyectará desde el estado de la app
 # from ..rag.retrieval.retriever import RAGRetriever # Se inyectará desde el estado de la app
@@ -20,31 +21,41 @@ router = APIRouter()
 @router.get("/rag-status", response_model=RAGStatusResponse)
 async def rag_status(request: Request):
     """Endpoint para obtener el estado actual del RAG."""
-    pdf_processor = request.app.state.pdf_processor
-    # rag_retriever = request.app.state.rag_retriever # No se usa directamente en este endpoint
+    pdf_manager = request.app.state.pdf_file_manager
     try:
-        pdfs_raw = pdf_processor.list_pdfs()
-        vector_store_info_raw = pdf_processor.get_vector_store_info()
+        pdfs_raw = await pdf_manager.list_pdfs()
         
-        pdf_details_list = [
+        # Formatear los PDFs al formato esperado por el esquema
+        pdf_details = [
             RAGStatusPDFDetail(
                 filename=p["filename"],
-                path=str(p["path"]),
+                path=p["path"],
                 size=p["size"],
                 last_modified=datetime.datetime.fromtimestamp(p["last_modified"])
             ) for p in pdfs_raw
         ]
         
+        # Usar la ruta correcta del vector store desde las settings de la aplicación
+        vector_store_full_path = Path(request.app.state.settings.vector_store_path).resolve()
+        vector_store_exists = vector_store_full_path.exists()
+        vector_store_size = 0
+        if vector_store_exists:
+            # Calcular el tamaño del directorio del vector store
+            vector_store_size = sum(f.stat().st_size for f in vector_store_full_path.rglob("*") if f.is_file())
+        
         vector_store_detail = RAGStatusVectorStoreDetail(
-            path=str(vector_store_info_raw.get("path", "N/A")),
-            exists=vector_store_info_raw.get("exists", False),
-            size=vector_store_info_raw.get("size", 0)
+            path=str(vector_store_full_path),
+            exists=vector_store_exists,
+            size=vector_store_size
         )
         
+        # Obtener el conteo real de documentos (chunks) del vector store
+        vector_store_documents_count = await request.app.state.vector_store.get_document_count()
+
         return RAGStatusResponse(
-            pdfs=pdf_details_list,
+            pdfs=pdf_details,
             vector_store=vector_store_detail,
-            total_documents=len(pdf_details_list)
+            total_documents=vector_store_documents_count # Ahora refleja el conteo real del vector store
         )
     except Exception as e:
         logger.error(f"Error al obtener estado RAG: {str(e)}", exc_info=True)
@@ -53,7 +64,7 @@ async def rag_status(request: Request):
 @router.post("/clear-rag", response_model=ClearRAGResponse)
 async def clear_rag(request: Request):
     """Endpoint para limpiar el RAG."""
-    pdf_processor = request.app.state.pdf_processor
+    pdf_manager = request.app.state.pdf_file_manager
     rag_retriever = request.app.state.rag_retriever
     try:
         logger.info("Iniciando limpieza del RAG...")
@@ -61,19 +72,19 @@ async def clear_rag(request: Request):
         rag_retriever.clear()
         logger.info("Vector store limpiado")
         
-        pdf_processor.clear_pdfs()
+        clear_result = await pdf_manager.clear_all_pdfs()
         logger.info("Directorio de PDFs limpiado")
         
-        pdfs_after_clear = pdf_processor.list_pdfs()
-        vector_store_info_after_clear = pdf_processor.get_vector_store_info()
-        
-        remaining_pdfs_count = len(pdfs_after_clear)
-        vector_store_size_after_clear = vector_store_info_after_clear.get("size", 0)
+        pdfs_after_clear = await pdf_manager.list_pdfs()
+        vector_store_path = Path(pdf_manager.pdf_dir).parent / "vector_store"
+        vector_store_size = 0
+        if vector_store_path.exists():
+            vector_store_size = sum(f.stat().st_size for f in vector_store_path.rglob("*") if f.is_file())
 
         status_val = "success"
         message_val = "RAG limpiado exitosamente"
 
-        if remaining_pdfs_count > 0 or vector_store_size_after_clear > 0:
+        if clear_result["errors_count"] > 0 or vector_store_size > 0:
             logger.warning("Algunos archivos no se pudieron limpiar completamente del RAG.")
             status_val = "warning"
             message_val = "RAG limpiado parcialmente. Algunos archivos o datos del vector store no se pudieron eliminar."
@@ -81,8 +92,8 @@ async def clear_rag(request: Request):
         return ClearRAGResponse(
             status=status_val,
             message=message_val,
-            remaining_pdfs=remaining_pdfs_count,
-            vector_store_size=vector_store_size_after_clear
+            remaining_pdfs=len(pdfs_after_clear),
+            vector_store_size=vector_store_size
         )
     except Exception as e:
         logger.error(f"Error al limpiar RAG: {str(e)}", exc_info=True)

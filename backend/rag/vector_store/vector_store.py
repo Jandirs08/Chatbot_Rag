@@ -132,6 +132,15 @@ class VectorStore:
             logger.error(f"Error inicializando vector store: {str(e)}", exc_info=True)
             raise
 
+    async def get_document_count(self) -> int:
+        """Obtiene el número total de documentos (chunks) almacenados en el vector store."""
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self.store._collection.count)
+        except Exception as e:
+            logger.error(f"Error al obtener el conteo de documentos del vector store: {str(e)}", exc_info=True)
+            return 0
+
     async def add_documents(self, documents: List[Document], embeddings: list = None) -> None:
         """Añade documentos al almacenamiento de forma optimizada, permitiendo pasar embeddings explícitos."""
         if not documents:

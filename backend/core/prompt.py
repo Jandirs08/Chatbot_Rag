@@ -3,7 +3,7 @@ Módulo que contiene los prompts y personalidad del bot.
 """
 
 # Constante para el nombre del bot
-BOT_NAME = "Asesor Virtual Académico"
+BOT_NAME = "Romerito"
 
 # Personalidad base del bot
 BOT_PERSONALITY = """
