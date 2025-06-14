@@ -15,29 +15,41 @@ import {
   TrendingUp,
   Users,
   MessageCircle,
+  FileDown,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { botService } from "./lib/services/botService";
+import { exportService } from "./lib/services/exportService";
+import { statsService } from "./lib/services/statsService";
 import { toast } from "sonner";
 
 export default function Dashboard() {
   const [isBotActive, setIsBotActive] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState({
+    total_queries: 0,
+    total_users: 0,
+    total_pdfs: 0,
+  });
 
   useEffect(() => {
-    const fetchBotState = async () => {
+    const fetchData = async () => {
       try {
-        const state = await botService.getState();
-        setIsBotActive(state.is_active);
+        const [botState, statsData] = await Promise.all([
+          botService.getState(),
+          statsService.getStats(),
+        ]);
+        setIsBotActive(botState.is_active);
+        setStats(statsData);
       } catch (error) {
-        console.error("Error al obtener el estado del bot:", error);
-        toast.error("Error al obtener el estado del bot");
+        console.error("Error al obtener datos:", error);
+        toast.error("Error al obtener datos del dashboard");
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchBotState();
+    fetchData();
   }, []);
 
   const handleBotToggle = async (checked: boolean) => {
@@ -56,32 +68,28 @@ export default function Dashboard() {
     }
   };
 
-  const stats = [
+  const statsCards = [
     {
       title: "PDFs Activos",
-      value: "12",
-      change: "+2 esta semana",
+      value: stats.total_pdfs.toString(),
       icon: FileText,
       color: "text-primary",
     },
     {
-      title: "Consultas Hoy",
-      value: "247",
-      change: "+18% vs ayer",
+      title: "Consultas",
+      value: stats.total_queries.toString(),
       icon: MessageCircle,
       color: "text-accent",
     },
     {
       title: "Eficiencia RAG",
       value: "94%",
-      change: "+5% este mes",
       icon: TrendingUp,
       color: "text-secondary",
     },
     {
-      title: "Usuario Activos",
-      value: "1,234",
-      change: "+12% este mes",
+      title: "Usuarios Activos",
+      value: stats.total_users.toString(),
       icon: Users,
       color: "text-primary",
     },
@@ -108,6 +116,20 @@ export default function Dashboard() {
       icon: Settings,
       href: "/configuracion",
       gradient: "gradient-soft",
+    },
+    {
+      title: "Exportar Conversaciones",
+      description: "Descarga todas las conversaciones en Excel",
+      icon: FileDown,
+      onClick: async () => {
+        try {
+          await exportService.exportConversations();
+          toast.success("Conversaciones exportadas exitosamente");
+        } catch (error) {
+          toast.error("Error al exportar conversaciones");
+        }
+      },
+      gradient: "gradient-accent",
     },
   ];
 
@@ -199,7 +221,7 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, index) => (
+        {statsCards.map((stat, index) => (
           <Card
             key={index}
             className="hover:shadow-lg transition-all duration-300 border-border/50"
@@ -214,9 +236,6 @@ export default function Dashboard() {
               <div className="text-2xl font-bold text-foreground">
                 {stat.value}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {stat.change}
-              </p>
             </CardContent>
           </Card>
         ))}
@@ -227,11 +246,12 @@ export default function Dashboard() {
         <h2 className="text-2xl font-semibold text-foreground">
           Acciones Rápidas
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {quickActions.map((action, index) => (
             <Card
               key={index}
               className="group hover:shadow-xl transition-all duration-300 cursor-pointer border-border/50 overflow-hidden"
+              onClick={action.onClick}
             >
               <CardHeader className="space-y-4">
                 <div
@@ -248,14 +268,6 @@ export default function Dashboard() {
                   </CardDescription>
                 </div>
               </CardHeader>
-              <CardContent>
-                <Button
-                  asChild
-                  className="w-full gradient-primary hover:opacity-90 transition-opacity"
-                >
-                  <a href={action.href}>Abrir</a>
-                </Button>
-              </CardContent>
             </Card>
           ))}
         </div>
