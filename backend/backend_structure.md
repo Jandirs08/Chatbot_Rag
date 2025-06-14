@@ -1,70 +1,60 @@
 # Estructura del Backend
 
-## Estructura de Directorios
-
 ```
 backend/
 ├── api/                    # API REST y endpoints
 │   ├── routes/            # Rutas de la API
-│   │   ├── chat.py       # Endpoints de chat
-│   │   ├── documents.py  # Endpoints de documentos
-│   │   └── rag.py        # Endpoints de RAG
+│   │   ├── chat/         # Endpoints de chat
+│   │   └── pdf/          # Endpoints de PDF
 │   ├── schemas/          # Esquemas Pydantic
-│   │   ├── chat.py      # Esquemas de chat
-│   │   ├── documents.py # Esquemas de documentos
-│   │   └── rag.py       # Esquemas de RAG
 │   ├── app.py           # Configuración de FastAPI
-│   └── health_check_routes.py # Endpoints de salud
+│   └── __init__.py      # Inicialización de la API
 │
 ├── core/                  # Núcleo de la aplicación
 │   ├── bot.py           # Lógica principal del bot
-│   ├── chain.py         # Cadena de procesamiento
-│   ├── prompt.py        # Gestión de prompts
-│   └── gradio_ui.py     # Interfaz Gradio
+│   ├── chain.py         # Gestión de cadenas de procesamiento
+│   ├── prompt.py        # Gestión de prompts y personalidad
+│   ├── README.md        # Documentación del core
+│   └── __init__.py      # Inicialización del core
 │
 ├── rag/                  # Sistema RAG
 │   ├── ingestion/       # Procesamiento de documentos
 │   ├── embeddings/      # Generación de embeddings
 │   ├── pdf_processor/   # Procesamiento de PDFs
 │   ├── vector_store/    # Almacenamiento vectorial
-│   └── retrieval/       # Recuperación de información
+│   ├── retrieval/       # Recuperación de información
+│   └── __init__.py      # Inicialización del RAG
 │
 ├── storage/             # Almacenamiento unificado
 │   ├── documents/      # Documentos procesados
-│   ├── embeddings/     # Embeddings generados
-│   ├── vector_store/   # Base de datos vectorial
-│   └── temp/          # Archivos temporales
-│
-├── file_system/         # Gestión de archivos
-│   ├── pdf_file_manager.py # Gestor de PDFs
-│   └── file_utils.py    # Utilidades de archivos
-│
-├── utils/               # Utilidades generales
-│   ├── logger.py       # Sistema de logging
-│   └── helpers.py      # Funciones auxiliares
-│
-├── models/              # Modelos de datos
-│   ├── document.py     # Modelo de documento
-│   └── chat.py         # Modelo de chat
-│
-├── memory/             # Gestión de memoria
-│   └── memory_manager.py # Gestor de memoria
+│   └── vector_store/   # Base de datos vectorial
 │
 ├── database/           # Base de datos
-│   └── db_manager.py   # Gestor de base de datos
+│   └── mongodb.py     # Conexión y operaciones con MongoDB
 │
-├── tools/              # Herramientas y utilidades
-│   └── text_processor.py # Procesamiento de texto
+├── models/             # Modelos de datos
+│   ├── model_types.py # Tipos de modelos soportados
+│   └── __init__.py    # Inicialización de modelos
 │
-├── common/             # Código compartido
-│   └── constants.py    # Constantes globales
+├── memory/            # Gestión de memoria
+│   └── memory_manager.py # Gestor de memoria
 │
-├── dev/                # Herramientas de desarrollo
-│   └── test_utils.py   # Utilidades de prueba
+├── utils/             # Utilidades generales
+│   ├── cache.py      # Sistema de caché
+│   └── __init__.py   # Inicialización de utilidades
 │
-├── config.py           # Configuración global
-├── main.py            # Punto de entrada
-└── requirements.txt    # Dependencias
+├── common/            # Código compartido
+│   └── constants.py   # Constantes globales
+│
+├── dev/               # Herramientas de desarrollo
+│   └── test_utils.py  # Utilidades de prueba
+│
+├── config.py          # Configuración global
+├── main.py           # Punto de entrada
+├── requirements.txt   # Dependencias
+├── setup.bat         # Script de configuración Windows
+├── setup.sh          # Script de configuración Linux
+└── Dockerfile        # Configuración de Docker
 ```
 
 ## Descripción de Componentes
@@ -72,22 +62,17 @@ backend/
 ### API (`api/`)
 
 - **routes/**: Endpoints de la API REST
-  - `chat.py`: Endpoints para interacción con el chat
-  - `documents.py`: Endpoints para gestión de documentos
-  - `rag.py`: Endpoints para operaciones RAG
+  - `chat/`: Endpoints para interacción con el chat
+  - `pdf/`: Endpoints para gestión de PDFs
 - **schemas/**: Esquemas Pydantic para validación
-  - `chat.py`: Esquemas para mensajes y respuestas
-  - `documents.py`: Esquemas para documentos
-  - `rag.py`: Esquemas para operaciones RAG
 - `app.py`: Configuración principal de FastAPI
-- `health_check_routes.py`: Endpoints de monitoreo
 
 ### Core (`core/`)
 
 - `bot.py`: Implementación principal del bot
-- `chain.py`: Cadena de procesamiento de mensajes
-- `prompt.py`: Gestión y templates de prompts
-- `gradio_ui.py`: Interfaz de usuario Gradio
+- `chain.py`: Gestión de cadenas de procesamiento
+- `prompt.py`: Gestión de prompts y personalidad
+- `README.md`: Documentación detallada del core
 
 ### RAG (`rag/`)
 
@@ -100,36 +85,23 @@ backend/
 ### Storage (`storage/`)
 
 - **documents/**: Almacenamiento de documentos procesados
-- **embeddings/**: Almacenamiento de embeddings
 - **vector_store/**: Base de datos vectorial
-- **temp/**: Archivos temporales
 
-### File System (`file_system/`)
+### Database (`database/`)
 
-- `pdf_file_manager.py`: Gestión de archivos PDF
-- `file_utils.py`: Utilidades para manejo de archivos
-
-### Utils (`utils/`)
-
-- `logger.py`: Sistema de logging
-- `helpers.py`: Funciones auxiliares
+- `mongodb.py`: Gestión de conexión y operaciones con MongoDB
 
 ### Models (`models/`)
 
-- `document.py`: Modelos de datos para documentos
-- `chat.py`: Modelos de datos para chat
+- `model_types.py`: Definición de tipos de modelos soportados
 
 ### Memory (`memory/`)
 
 - `memory_manager.py`: Gestión de memoria y contexto
 
-### Database (`database/`)
+### Utils (`utils/`)
 
-- `db_manager.py`: Gestión de base de datos
-
-### Tools (`tools/`)
-
-- `text_processor.py`: Procesamiento de texto
+- `cache.py`: Sistema de caché para optimizar respuestas
 
 ### Common (`common/`)
 
@@ -144,3 +116,10 @@ backend/
 - `config.py`: Configuración global de la aplicación
 - `main.py`: Punto de entrada de la aplicación
 - `requirements.txt`: Dependencias del proyecto
+- `setup.bat`: Script de configuración para Windows
+- `setup.sh`: Script de configuración para Linux
+- `Dockerfile`: Configuración para contenedorización
+
+```
+
+```

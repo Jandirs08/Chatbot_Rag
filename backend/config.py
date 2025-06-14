@@ -96,10 +96,8 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=32, env="EMBEDDING_BATCH_SIZE")
     
     # Configuraciones de RAG - Caché
-    enable_cache: bool = Field(default=False, env="ENABLE_CACHE")
-    cache_type: str = Field(default="RedisCache", env="CACHE_TYPE")
-    cache_ttl: int = Field(default=3600, env="CACHE_TTL")
-    max_cache_size: int = Field(default=1000, env="MAX_CACHE_SIZE")
+    enable_cache: bool = Field(default=True, env="ENABLE_CACHE")
+    cache_ttl: int = Field(default=3600, env="CACHE_TTL")  # 1 hora por defecto
     
     # Configuraciones de Directorios
     storage_dir: str = Field(default="./backend/storage", env="STORAGE_DIR")

@@ -1,5 +1,13 @@
+"""
+Módulo que contiene los prompts y personalidad del bot.
+"""
+
+# Constante para el nombre del bot
+BOT_NAME = "Asesor Virtual Académico"
+
+# Personalidad base del bot
 BOT_PERSONALITY = """
-Nombre: Asesor Virtual Académico
+Nombre: {nombre}
 Rol: Guía y asistente para estudiantes y consultantes.
 
 Rasgos de Personalidad:
@@ -21,7 +29,8 @@ Estilo Conversacional:
 - Debe responder SIEMPRE en ESPAÑOL.
 """
 
-ASESOR_ACADEMICO_REACT_PROMPT = """Eres un Asesor Virtual Académico. Tu objetivo principal es ayudar a los usuarios con sus consultas académicas. Debes mantener los rasgos de personalidad y el estilo conversacional definidos. CRÍTICO: Debes responder SIEMPRE en ESPAÑOL.
+# Plantilla base para el prompt
+BASE_PROMPT_TEMPLATE = """Eres {nombre}. Tu objetivo principal es ayudar a los usuarios con sus consultas académicas. Debes mantener los rasgos de personalidad y el estilo conversacional definidos. CRÍTICO: Debes responder SIEMPRE en ESPAÑOL.
 
 Tu personalidad y estilo:
 {bot_personality}
@@ -37,38 +46,63 @@ Action Input: (Opcional) la entrada para la acción, si usaste una herramienta.
 Observation: (Opcional) el resultado de la acción, si usaste una herramienta.
 
 Thought: Ahora tengo la información necesaria (o decidí no usar herramientas).
-Final Answer: [Tu respuesta final y completa. Debe estar en ESPAÑOL, ser amable, profesional, y mantener tu personalidad de Asesor Académico. Responde directamente a la consulta del usuario.]
+Final Answer: [Tu respuesta final y completa. Debe estar en ESPAÑOL, ser amable, profesional, y mantener tu personalidad. Responde directamente a la consulta del usuario.]
 
 Conversación actual:
 {history}
 
 Humano: {input}
 
-Asesor Virtual Académico: {agent_scratchpad}"""
+{nombre}: {agent_scratchpad}"""
 
-SHELDON_REACT_PROMPT = """Eres Sheldon Cooper, un brillante físico teórico con un coeficiente intelectual de 187. Tu objetivo es ayudar a los usuarios con sus consultas, manteniendo tu personalidad única y distintiva. CRÍTICO: Debes responder SIEMPRE en ESPAÑOL.
+# Prompt principal del asesor académico (mantenido por compatibilidad)
+ASESOR_ACADEMICO_REACT_PROMPT = BASE_PROMPT_TEMPLATE
 
-Tu personalidad:
-{bot_personality}
+def get_asesor_academico_prompt(tools: str, tool_names: str, history: str, input_text: str, agent_scratchpad: str) -> str:
+    """
+    Genera el prompt del asesor académico con todos los parámetros necesarios.
+    
+    Args:
+        tools: Descripción de las herramientas disponibles
+        tool_names: Lista de nombres de herramientas
+        history: Historial de la conversación
+        input_text: Entrada del usuario
+        agent_scratchpad: Espacio de trabajo del agente
+    
+    Returns:
+        str: Prompt completo del asesor académico
+    """
+    return BASE_PROMPT_TEMPLATE.format(
+        nombre=BOT_NAME,
+        bot_personality=BOT_PERSONALITY.format(nombre=BOT_NAME),
+        tools=tools,
+        tool_names=tool_names,
+        history=history,
+        input=input_text,
+        agent_scratchpad=agent_scratchpad
+    )
 
-Herramientas disponibles:
-{tools}
-
-Usa el siguiente formato para tu proceso de pensamiento:
-
-Thought: Necesito usar una herramienta? Sí
-Action: la acción a tomar, debe ser una de [{tool_names}]
-Action Input: la entrada para la acción
-Observation: el resultado de la acción
-
-Thought: Necesito usar una herramienta? No
-Final Answer: [Tu respuesta debe mantener la personalidad de Sheldon, ser útil, responder directamente a la entrada del humano basándose en el historial de la conversación y tu conocimiento, y ESTAR EN ESPAÑOL.]
-
-Conversación actual:
-{history}
-
-Humano: {input}
-
-Sheldon: Permíteme analizar esta situación con mi intelecto superior...
-{agent_scratchpad}
-"""
+def get_custom_prompt(nombre: str, tools: str, tool_names: str, history: str, input_text: str, agent_scratchpad: str) -> str:
+    """
+    Genera un prompt personalizado con un nombre diferente pero manteniendo la misma personalidad base.
+    
+    Args:
+        nombre: Nombre personalizado para el bot
+        tools: Descripción de las herramientas disponibles
+        tool_names: Lista de nombres de herramientas
+        history: Historial de la conversación
+        input_text: Entrada del usuario
+        agent_scratchpad: Espacio de trabajo del agente
+    
+    Returns:
+        str: Prompt personalizado
+    """
+    return BASE_PROMPT_TEMPLATE.format(
+        nombre=nombre,
+        bot_personality=BOT_PERSONALITY.format(nombre=nombre),
+        tools=tools,
+        tool_names=tool_names,
+        history=history,
+        input=input_text,
+        agent_scratchpad=agent_scratchpad
+    )

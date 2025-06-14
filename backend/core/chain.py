@@ -1,4 +1,10 @@
+"""
+Módulo que contiene la gestión de cadenas de procesamiento.
+"""
+
 from typing import Optional, Dict, Any, Union, List
+import colorama
+from colorama import Fore, Style
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableLambda, Runnable
@@ -10,6 +16,9 @@ from ..config import Settings, get_settings
 from . import prompt as prompt_module
 
 import logging
+
+# Inicializar colorama
+colorama.init()
 
 class ChainManager:
     def __init__(
@@ -23,7 +32,13 @@ class ChainManager:
         self.settings = settings if settings is not None else get_settings()
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        self.prompt_input_variables: Dict[str, Any] = {}
+        # Validar que todos los componentes del prompt estén disponibles
+        self._validate_prompt_components()
+
+        self.prompt_input_variables: Dict[str, Any] = {
+            "nombre": prompt_module.BOT_NAME  # Agregamos el nombre del bot por defecto
+        }
+        
         if custom_bot_personality_str is not None:
             self.prompt_input_variables["bot_personality"] = custom_bot_personality_str
         elif self.settings.bot_personality_name:
@@ -60,6 +75,50 @@ class ChainManager:
         
         self._prompt = self._raw_prompt_template.partial(**self.prompt_input_variables)
         self._init_chain()
+
+    def _validate_prompt_components(self):
+        """Valida que todos los componentes del prompt estén disponibles y muestra un log visible."""
+        try:
+            # Verificar que existan todas las constantes necesarias
+            required_components = [
+                ('BOT_NAME', prompt_module.BOT_NAME),
+                ('BOT_PERSONALITY', prompt_module.BOT_PERSONALITY),
+                ('BASE_PROMPT_TEMPLATE', prompt_module.BASE_PROMPT_TEMPLATE),
+                ('ASESOR_ACADEMICO_REACT_PROMPT', prompt_module.ASESOR_ACADEMICO_REACT_PROMPT)
+            ]
+
+            # Verificar que todas las funciones necesarias existan
+            required_functions = [
+                'get_asesor_academico_prompt',
+                'get_custom_prompt'
+            ]
+
+            # Verificar constantes
+            for name, value in required_components:
+                if not value:
+                    raise ValueError(f"Componente requerido '{name}' está vacío o no definido")
+
+            # Verificar funciones
+            for func_name in required_functions:
+                if not hasattr(prompt_module, func_name):
+                    raise ValueError(f"Función requerida '{func_name}' no encontrada")
+
+            # Si todo está bien, mostrar mensaje de éxito
+            print(f"\n{Fore.GREEN}{'='*80}")
+            print(f"{Fore.GREEN}✓ Sistema de Prompts Cargado Exitosamente")
+            print(f"{Fore.GREEN}✓ Nombre del Bot: {prompt_module.BOT_NAME}")
+            print(f"{Fore.GREEN}✓ Personalidad Base: Cargada")
+            print(f"{Fore.GREEN}✓ Plantilla Base: Cargada")
+            print(f"{Fore.GREEN}✓ Funciones de Prompt: Cargadas")
+            print(f"{Fore.GREEN}{'='*80}{Style.RESET_ALL}\n")
+
+        except Exception as e:
+            # Si hay error, mostrar mensaje de error
+            print(f"\n{Fore.RED}{'='*80}")
+            print(f"{Fore.RED}✗ Error al cargar el sistema de prompts:")
+            print(f"{Fore.RED}✗ {str(e)}")
+            print(f"{Fore.RED}{'='*80}{Style.RESET_ALL}\n")
+            raise
 
     def _load_prompt_from_module(self, prompt_name: str) -> Optional[str]:
         try:

@@ -1,140 +1,170 @@
 from enum import Enum
 from typing import Optional, Any, Dict
-
 from langchain_community.cache import InMemoryCache, RedisCache
 from langchain.globals import set_llm_cache
-import hashlib
 import redis
-import json
 import logging
-from datetime import datetime, timedelta
-
+import time
 from ..config import Settings, get_settings
 
-try:
-    from langchain_community.cache import GPTCache
-    from gptcache import Cache as GPTCacheType
-    from gptcache.adapter.api import init_similar_cache
-    GPTCACHE_AVAILABLE = True
-except ImportError:
-    GPTCACHE_AVAILABLE = False
-    GPTCacheType = Any
-
-CACHE_TYPE: Dict[str, Any] = {
-    "in_memory": InMemoryCache,
-}
-
-if GPTCACHE_AVAILABLE:
-    CACHE_TYPE["GPTCache"] = GPTCache
-
-
 class CacheTypes(str, Enum):
-    GPTCache = "gptcache"
+    """Tipos de caché disponibles."""
     InMemoryCache = "inmemorycache"
     RedisCache = "rediscache"
 
-
-def get_hashed_name(name: str) -> str:
-    return hashlib.sha256(name.encode()).hexdigest()
-
-
-def init_gptcache(cache_obj: GPTCacheType, llm: str) -> None:
-    if not GPTCACHE_AVAILABLE:
-        raise ImportError("GPTCache is not available. Please install gptcache package.")
-    hashed_llm = get_hashed_name(llm)
-    init_similar_cache(cache_obj=cache_obj, data_dir=f"similar_cache_{hashed_llm}")
-
+class CacheMetrics:
+    """Métricas del sistema de caché."""
+    def __init__(self):
+        self.hits = 0
+        self.misses = 0
+        self.total_requests = 0
+        self.total_time = 0
+        self.last_reset = time.time()
+    
+    def record_hit(self, response_time: float):
+        """Registra un hit en el caché."""
+        self.hits += 1
+        self.total_requests += 1
+        self.total_time += response_time
+    
+    def record_miss(self, response_time: float):
+        """Registra un miss en el caché."""
+        self.misses += 1
+        self.total_requests += 1
+        self.total_time += response_time
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Obtiene estadísticas actuales del caché."""
+        total_time = time.time() - self.last_reset
+        return {
+            "hits": self.hits,
+            "misses": self.misses,
+            "total_requests": self.total_requests,
+            "hit_ratio": (self.hits / self.total_requests * 100) if self.total_requests > 0 else 0,
+            "avg_response_time": (self.total_time / self.total_requests) if self.total_requests > 0 else 0,
+            "uptime_seconds": total_time
+        }
+    
+    def reset(self):
+        """Reinicia las métricas."""
+        self.hits = 0
+        self.misses = 0
+        self.total_requests = 0
+        self.total_time = 0
+        self.last_reset = time.time()
 
 class ChatbotCache:
+    """Gestor de caché para el chatbot."""
+    
     def __init__(self, settings: Settings, cache_type: Optional[CacheTypes] = None, **kwargs):
+        """Inicializa el gestor de caché.
+        
+        Args:
+            settings: Configuraciones de la aplicación
+            cache_type: Tipo de caché a utilizar
+            **kwargs: Argumentos adicionales para la configuración del caché
+        """
         self.settings = settings
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.cache_type = cache_type or (CacheTypes[self.settings.cache_type] if self.settings.cache_type else None)
+        self.cache_type = cache_type or CacheTypes.RedisCache
         self.cache_kwargs = kwargs
+        self.metrics = CacheMetrics()
         self._init_cache()
 
     def _init_cache(self):
-        if self.cache_type is None:
-            self.logger.info("No cache type specified. LLM caching will be disabled.")
+        """Inicializa el caché según el tipo seleccionado."""
+        if not self.settings.enable_cache:
+            self.logger.info("Caché deshabilitado en la configuración.")
             set_llm_cache(None)
             return
 
-        self.logger.info(f"Initializing LLM cache of type: {self.cache_type.value}")
+        self.logger.info(f"Inicializando caché de tipo: {self.cache_type.value}")
         try:
-            if self.cache_type == CacheTypes.GPTCache:
-                # GPTCache specific initialization
-                def pre_embedding_function(data, **_):
-                    if isinstance(data, list) and len(data) > 0:
-                        data_str = str(data[0])
-                    else:
-                        data_str = str(data)
-                    return hashlib.sha256(data_str.encode()).hexdigest()
-
-                cache_obj = GPTCache(pre_embedding_function)
-            elif self.cache_type == CacheTypes.InMemoryCache:
-                cache_obj = InMemoryCache()
-            elif self.cache_type == CacheTypes.RedisCache:
+            if self.cache_type == CacheTypes.RedisCache:
                 if not self.settings.redis_url:
-                    self.logger.warning("RedisCache selected but REDIS_URL is not configured. Falling back to InMemoryCache.")
+                    self.logger.warning("RedisCache seleccionado pero REDIS_URL no está configurado. Usando InMemoryCache.")
                     cache_obj = InMemoryCache()
                 else:
                     try:
-                        # Configurar Redis con timeout y reintentos
+                        # Obtener la URL de Redis, manejando tanto SecretStr como str
+                        redis_url = (
+                            self.settings.redis_url.get_secret_value()
+                            if hasattr(self.settings.redis_url, 'get_secret_value')
+                            else str(self.settings.redis_url)
+                        )
+                        
                         redis_client = redis.from_url(
-                            self.settings.redis_url.get_secret_value(),
-                            socket_timeout=2,  # 2 segundos de timeout
+                            redis_url,
+                            socket_timeout=2,
                             socket_connect_timeout=2,
                             retry_on_timeout=True,
                             health_check_interval=30
                         )
-                        # Verificar conexión
                         redis_client.ping()
-                        cache_obj = RedisCache(redis_client, **self.cache_kwargs)
-                        self.logger.info(f"RedisCache initialized with TTL: {self.cache_kwargs.get('ttl')}")
-                    except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
-                        self.logger.warning(f"Failed to connect to Redis: {e}. Falling back to InMemoryCache.")
-                        cache_obj = InMemoryCache()
+                        cache_obj = RedisCache(
+                            redis_client,
+                            ttl=self.settings.cache_ttl,
+                            **self.cache_kwargs
+                        )
+                        self.logger.info(f"RedisCache inicializado con TTL: {self.settings.cache_ttl}")
                     except Exception as e:
-                        self.logger.error(f"Unexpected error with Redis: {e}. Falling back to InMemoryCache.")
+                        self.logger.warning(f"Error al conectar con Redis: {e}. Usando InMemoryCache.")
                         cache_obj = InMemoryCache()
             else:
-                self.logger.warning(f"Unsupported cache type: {self.cache_type}. Falling back to InMemoryCache.")
                 cache_obj = InMemoryCache()
+                self.logger.info("InMemoryCache inicializado")
             
             set_llm_cache(cache_obj)
-            self.logger.info(f"Successfully set LLM cache to: {self.cache_type.value}")
+            self.logger.info(f"Caché configurado exitosamente: {self.cache_type.value}")
 
-        except ImportError as e:
-            self.logger.error(f"Failed to import a caching library ({e}). Falling back to InMemoryCache.")
-            set_llm_cache(InMemoryCache())
         except Exception as e:
-            self.logger.error(f"Failed to initialize cache: {e}. Falling back to InMemoryCache.")
-            set_llm_cache(InMemoryCache())
+            self.logger.error(f"Error al inicializar caché: {e}. Deshabilitando caché.")
+            set_llm_cache(None)
 
     @staticmethod
     def create(cache_type: Optional[CacheTypes] = None, settings: Optional[Settings] = None, **kwargs) -> 'ChatbotCache':
+        """Crea una instancia de ChatbotCache.
+        
+        Args:
+            cache_type: Tipo de caché a utilizar
+            settings: Configuraciones de la aplicación
+            **kwargs: Argumentos adicionales para la configuración del caché
+            
+        Returns:
+            Instancia de ChatbotCache
+        """
         effective_settings = settings if settings is not None else get_settings()
         return ChatbotCache(settings=effective_settings, cache_type=cache_type, **kwargs)
 
-    def get_cache_instance(self) -> Optional[Any]: # Reemplazar Any con el tipo base de Langchain Cache si es conocido
-        # This method might be redundant if set_llm_cache is the primary way of interaction
-        # but can be useful for direct cache operations if needed.
-        if self.cache_type == CacheTypes.GPTCache:
-            # Return instance or relevant part of GPTCache
-            pass
-        elif self.cache_type == CacheTypes.InMemoryCache:
-            # Return instance of InMemoryCache
-            pass
-        elif self.cache_type == CacheTypes.RedisCache:
-            # Return instance of RedisCache
-            pass
-        return None # Placeholder
-
     def clear_cache(self):
-        # This would require specific implementations for each cache type
-        # For global langchain cache, there isn't a single clear_cache() method
-        # on set_llm_cache'd object directly in all cases.
-        # We might need to re-initialize to clear.
-        self.logger.info(f"Attempting to clear cache for type: {self.cache_type}")
-        self._init_cache() # Re-initializing might be the simplest way to clear/reset
-        self.logger.info(f"Cache re-initialized (effectively cleared).")
+        """Limpia el caché reinicializándolo."""
+        self.logger.info(f"Limpiando caché de tipo: {self.cache_type}")
+        self._init_cache()
+        self.metrics.reset()  # Reiniciar métricas al limpiar el caché
+        self.logger.info("Caché reinicializado (efectivamente limpiado).")
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """Obtiene las métricas actuales del caché.
+        
+        Returns:
+            Diccionario con las métricas del caché
+        """
+        metrics = self.metrics.get_stats()
+        metrics.update({
+            "cache_type": self.cache_type.value,
+            "enabled": self.settings.enable_cache,
+            "ttl": self.settings.cache_ttl
+        })
+        return metrics
+
+    def log_metrics(self):
+        """Registra las métricas actuales en el log."""
+        metrics = self.get_metrics()
+        self.logger.info(
+            f"Métricas de Caché - "
+            f"Tipo: {metrics['cache_type']}, "
+            f"Hits: {metrics['hits']}, "
+            f"Misses: {metrics['misses']}, "
+            f"Hit Ratio: {metrics['hit_ratio']:.1f}%, "
+            f"Tiempo Promedio: {metrics['avg_response_time']:.3f}s"
+        )

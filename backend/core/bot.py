@@ -3,6 +3,7 @@ import logging
 from queue import Queue
 from typing import Optional, Dict, Union, List, Any
 from operator import itemgetter
+import time
 
 from langchain.agents import AgentExecutor
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -41,17 +42,16 @@ class Bot:
         self.logger = logging.getLogger(self.__class__.__name__)
         
         # Initialize cache
-        self.cache = ChatbotCache(settings=self.settings)
+        self._cache = ChatbotCache.create(
+            settings=self.settings,
+            cache_type=cache or CacheTypes.RedisCache
+        )
         
         self._memory: AbstractChatbotMemory = self.get_memory(
             memory_type=memory_type,
             parameters=memory_kwargs
         )
-        if cache == CacheTypes.GPTCache and (model_type or ModelTypes[self.settings.model_type.upper()]) != ModelTypes.OPENAI:
-            self.logger.warning("GPTCache solo es compatible con modelos OpenAI. Desactivando caché.")
-            cache = None
-        self._cache = ChatbotCache.create(cache_type=cache)
-        self.logger = logging.getLogger(self.__class__.__name__)
+        
         self.agent_executor: Optional[AgentExecutor] = None
         
         # Inicializar tools
@@ -70,6 +70,10 @@ class Bot:
     @property
     def memory(self) -> AbstractChatbotMemory:
         return self._memory
+
+    @property
+    def cache(self) -> ChatbotCache:
+        return self._cache
 
     def start_agent(self):
         agent_runnable_core: Runnable = self.chain_manager.runnable_chain
@@ -188,6 +192,14 @@ class Bot:
     def reset_history(self, conversation_id: str):
         self.memory.clear(conversation_id=conversation_id)
 
+    def clear_cache(self):
+        """Limpia el caché del bot."""
+        if hasattr(self, '_cache'):
+            self._cache.clear_cache()
+            self.logger.info("Caché limpiado exitosamente")
+        else:
+            self.logger.warning("No se encontró caché para limpiar")
+
     async def add_message_to_memory(
             self,
             human_message: Union[Message, str],
@@ -258,20 +270,56 @@ class Bot:
             self.logger.error(f"Error en __call__: {str(e)}", exc_info=True)
             raise
 
-    def predict(self, sentence: str, conversation_id: str = None) -> Message:
-        message = Message(message=sentence, role=self.settings.human_prefix)
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                self.logger.warning("predict() llamado en un loop de asyncio ya activo. Esto puede no funcionar como se espera.")
-                raise NotImplementedError("Llamar a predict() desde un loop de asyncio activo no está soportado directamente. Use el método async __call__.")
-            else:
-                output = asyncio.run(self(message, conversation_id=conversation_id))
-        except RuntimeError as e:
-            self.logger.error(f"Error en asyncio.run dentro de predict(): {e}. Considere llamar al bot de forma asíncrona.")
-            output = Message(message=f"Error de concurrencia al procesar: {e}", role=self.settings.ai_prefix)
+    async def predict(self, sentence: str, conversation_id: str = None) -> Message:
+        """Predice una respuesta para una entrada dada.
         
-        return output
+        Args:
+            sentence: Texto de entrada
+            conversation_id: ID de la conversación
+            
+        Returns:
+            Mensaje con la respuesta
+        """
+        start_time = time.time()
+        try:
+            # Preparar el input para el agente
+            agent_input = {
+                "input": sentence,
+                "conversation_id": conversation_id or "default_session"
+            }
+            
+            # Ejecutar el agente de forma asíncrona
+            result = await self.agent_executor.ainvoke(agent_input)
+            
+            # Calcular tiempo de respuesta
+            response_time = time.time() - start_time
+            
+            # Registrar hit en el caché
+            if hasattr(self, '_cache'):
+                self._cache.metrics.record_hit(response_time)
+            
+            # Extraer la respuesta final
+            if isinstance(result, dict):
+                if "output" in result:
+                    return Message(message=result["output"], role=self.settings.ai_prefix)
+                elif "response" in result:
+                    return Message(message=result["response"], role=self.settings.ai_prefix)
+            
+            return Message(message=str(result), role=self.settings.ai_prefix)
+            
+        except Exception as e:
+            # Calcular tiempo de respuesta
+            response_time = time.time() - start_time
+            
+            # Registrar miss en el caché
+            if hasattr(self, '_cache'):
+                self._cache.metrics.record_miss(response_time)
+            
+            self.logger.error(f"Error en predict: {e}", exc_info=True)
+            return Message(
+                message="Lo siento, ha ocurrido un error al procesar tu solicitud.",
+                role=self.settings.ai_prefix
+            )
 
     def call(self, input_data: dict) -> Message:
         sentence = input_data.get("input") or input_data.get("sentence")
