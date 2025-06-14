@@ -9,7 +9,7 @@ from pathlib import Path
 from ..config import get_settings, settings
 from ..chat.manager import ChatManager
 from ..rag.retrieval.retriever import RAGRetriever
-from ..file_system.pdf_file_manager import PDFFileManager
+from ..storage.documents import PDFManager
 
 # Importar Routers
 from .routes.health.health_routes import router as health_router
@@ -37,8 +37,8 @@ async def lifespan(app: FastAPI):
         app.state.settings = s
 
         # Inicializar componentes
-        app.state.pdf_file_manager = PDFFileManager(base_dir=Path(s.pdfs_dir).resolve() if s.pdfs_dir else None)
-        logger.info(f"PDFFileManager inicializado. Directorio de PDFs: {app.state.pdf_file_manager.pdf_dir}")
+        app.state.pdf_file_manager = PDFManager(base_dir=Path(s.pdfs_dir).resolve() if s.pdfs_dir else None)
+        logger.info(f"PDFManager inicializado. Directorio de PDFs: {app.state.pdf_file_manager.pdf_dir}")
 
         app.state.pdf_content_loader = PDFContentLoader(chunk_size=s.chunk_size, chunk_overlap=s.chunk_overlap)
         logger.info(f"PDFContentLoader inicializado con chunk_size={s.chunk_size}, overlap={s.chunk_overlap}")

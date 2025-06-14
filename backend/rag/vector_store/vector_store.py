@@ -589,7 +589,8 @@ class VectorStore:
                 self.redis_client.flushdb()
             else:
                 self._query_cache.clear()
-            logger.info("Caché de vector store invalidado")
+            # Solo loguear si estamos en modo debug
+            logger.debug("Caché de vector store invalidado")
         except Exception as e:
             logger.error(f"Error invalidando caché: {str(e)}")
 

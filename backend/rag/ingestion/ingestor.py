@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from langchain_core.documents import Document
 
-from ...file_system.pdf_file_manager import PDFFileManager
+from ...storage.documents import PDFManager
 from ..pdf_processor.pdf_loader import PDFContentLoader
 from ..embeddings.embedding_manager import EmbeddingManager
 from ..vector_store.vector_store import VectorStore
@@ -21,7 +21,7 @@ class RAGIngestor:
 
     def __init__(
         self,
-        pdf_file_manager: PDFFileManager,
+        pdf_file_manager: PDFManager,
         pdf_content_loader: PDFContentLoader,
         embedding_manager: EmbeddingManager,
         vector_store: VectorStore,

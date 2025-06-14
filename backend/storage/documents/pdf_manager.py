@@ -1,4 +1,4 @@
-"""Utilidades para la gestión de archivos PDF en el sistema de archivos."""
+"""Utilidades para la gestión de archivos PDF en el sistema de almacenamiento."""
 import os
 import aiofiles
 import asyncio
@@ -11,8 +11,8 @@ from functools import partial
 
 logger = logging.getLogger(__name__)
 
-class PDFFileManager:
-    """Clase para manejar las operaciones de archivos PDF en el sistema de archivos."""
+class PDFManager:
+    """Clase para manejar las operaciones de archivos PDF en el sistema de almacenamiento."""
     
     def __init__(self, base_dir: Optional[Path] = None, max_workers: int = 4):
         """Inicializa el gestor de archivos PDF.
@@ -175,20 +175,4 @@ class PDFFileManager:
             
     def __del__(self):
         """Limpieza al destruir la instancia."""
-        self.executor.shutdown(wait=True)
-
-# Ejemplo de cómo podría usarse (esto no iría aquí usualmente):
-# if __name__ == '__main__':
-#     # Suponiendo que este archivo está en backend/file_system/pdf_file_manager.py
-#     # El base_dir por defecto sería la raíz del proyecto.
-#     pdf_manager = PDFFileManager() 
-#     print(f"Directorio de PDFs: {pdf_manager.pdf_dir}")
-#     # Para probar, necesitarías un objeto UploadFile mock o un archivo real.
-
-# Ejemplo de cómo podría usarse (esto no iría aquí usualmente):
-# if __name__ == '__main__':
-#     # Suponiendo que este archivo está en backend/file_system/pdf_file_manager.py
-#     # El base_dir por defecto sería la raíz del proyecto.
-#     pdf_manager = PDFFileManager() 
-#     print(f"Directorio de PDFs: {pdf_manager.pdf_dir}")
-#     # Para probar, necesitarías un objeto UploadFile mock o un archivo real. 
+        self.executor.shutdown(wait=True) 
