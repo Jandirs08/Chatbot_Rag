@@ -14,9 +14,9 @@ class PDFContentLoader:
     """Cargador optimizado de contenido PDF con pre y post procesamiento."""
     
     def __init__(self, 
-                 chunk_size: int = 700, 
-                 chunk_overlap: int = 150,
-                 min_chunk_length: int = 100):
+                 chunk_size: int = 1000,  # Aumentado de 700
+                 chunk_overlap: int = 200,  # Aumentado de 150
+                 min_chunk_length: int = 50):  # Reducido de 100
         """Inicializa el cargador con parámetros mejorados.
         
         Args:
@@ -116,32 +116,38 @@ class PDFContentLoader:
 
     def _clean_text(self, text: str) -> str:
         """Limpia el texto de caracteres y patrones no deseados."""
-        # Eliminar caracteres de control excepto saltos de línea
-        text = ''.join(char for char in text if char == '\n' or char.isprintable())
+        # Eliminar caracteres de control excepto saltos de línea y tabulaciones
+        text = ''.join(char for char in text if char in ['\n', '\t'] or char.isprintable())
         
-        # Eliminar múltiples espacios en blanco
-        text = re.sub(r'\s+', ' ', text)
+        # Preservar múltiples espacios en blanco que podrían ser significativos
+        text = re.sub(r'[ \t]+', ' ', text)
         
-        # Eliminar líneas vacías múltiples
+        # Preservar saltos de línea significativos
         text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
         
-        # Eliminar espacios al inicio y final de líneas
-        text = '\n'.join(line.strip() for line in text.splitlines())
+        # Eliminar espacios al inicio y final de líneas, pero preservar indentación
+        lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped:
+                # Preservar la indentación original
+                indent = len(line) - len(line.lstrip())
+                lines.append(' ' * indent + stripped)
         
-        return text.strip()
+        return '\n'.join(lines)
 
     def _normalize_text(self, text: str) -> str:
         """Normaliza espacios, puntuación y formato del texto."""
-        # Normalizar puntuación
-        text = re.sub(r'[\s]*([.,!?;:])', r'\1', text)
+        # Preservar espacios alrededor de puntuación cuando sea significativo
+        text = re.sub(r'[\s]*([.,!?;:])[\s]*', r'\1 ', text)
         
-        # Asegurar espacio después de puntuación
+        # Asegurar espacio después de puntuación solo si no hay ya un espacio
         text = re.sub(r'([.,!?;:])([^\s])', r'\1 \2', text)
         
-        # Normalizar guiones
+        # Normalizar guiones manteniendo su significado
         text = re.sub(r'[\u2010-\u2015]', '-', text)
         
-        # Normalizar comillas
+        # Normalizar comillas preservando su significado
         text = re.sub(r'[\u2018\u2019]', "'", text)
         text = re.sub(r'[\u201C\u201D]', '"', text)
         
@@ -149,41 +155,39 @@ class PDFContentLoader:
 
     def _preserve_structures(self, text: str) -> str:
         """Detecta y preserva estructuras importantes en el texto."""
-        # Preservar listas numeradas
+        # Preservar listas numeradas con mejor manejo de formato
         text = re.sub(r'(\d+\.\s*)(\n\s*)', r'\1', text)
         
-        # Preservar listas con viñetas
-        text = re.sub(r'([\u2022\-*]\s*)(\n\s*)', r'\1', text)
+        # Preservar listas con viñetas y diferentes estilos
+        text = re.sub(r'([\u2022\-*•]\s*)(\n\s*)', r'\1', text)
         
-        # Preservar títulos y encabezados
+        # Preservar títulos y encabezados con mejor detección
         text = re.sub(r'([A-Z][^.!?]*:)(\n\s*)', r'\1 ', text)
+        
+        # Preservar tablas y estructuras tabulares
+        text = re.sub(r'(\|\s*[^\n]+\s*\|)(\n\s*)', r'\1', text)
+        
+        # Preservar definiciones y términos importantes
+        text = re.sub(r'([A-Z][a-z]+:)(\n\s*)', r'\1 ', text)
         
         return text
 
     def _postprocess_chunks(self, chunks: List[Document], pdf_path: Path) -> List[Document]:
-        """Mejora y filtra los chunks después de la división.
-        
-        Args:
-            chunks: Lista de chunks generados.
-            pdf_path: Ruta al archivo PDF original.
-            
-        Returns:
-            Lista de chunks procesados y filtrados.
-        """
+        """Mejora y filtra los chunks después de la división."""
         final_chunks = []
         for chunk in chunks:
-            # Filtrar chunks muy cortos o sin contenido significativo
+            # Reducir el umbral mínimo de longitud
             if len(chunk.page_content.strip()) < self.min_chunk_length:
                 continue
             
-            # Calcular métricas de calidad
+            # Calcular métricas de calidad con umbral más bajo
             content = chunk.page_content
             quality_score = self._calculate_chunk_quality(content)
             
-            if quality_score < 0.3:  # Umbral mínimo de calidad
+            if quality_score < 0.2:  # Reducido de 0.3
                 continue
                 
-            # Mejorar metadata
+            # Mejorar metadata con información más detallada
             chunk.metadata.update({
                 "source": pdf_path.name,
                 "file_path": str(pdf_path.resolve()),
@@ -191,7 +195,9 @@ class PDFContentLoader:
                 "content_hash": self._generate_content_hash(content),
                 "quality_score": quality_score,
                 "word_count": len(content.split()),
-                "char_count": len(content)
+                "char_count": len(content),
+                "has_important_terms": bool(self._extract_important_terms(content)),
+                "structure_type": self._detect_structure_type(content)
             })
             
             final_chunks.append(chunk)
@@ -241,46 +247,42 @@ class PDFContentLoader:
         return list(important_terms)
 
     def _calculate_chunk_quality(self, content: str) -> float:
-        """Calcula la calidad de un chunk basándose en varios factores."""
+        """Calcula la calidad de un chunk con criterios más flexibles."""
         score = 1.0
         
-        # Penalización por chunks muy cortos
+        # Penalización más suave por chunks cortos
         if len(content) < 50:
-            score *= 0.7
+            score *= 0.8  # Reducido de 0.7
         
-        # Penalización por densidad de palabras baja
+        # Penalización por contenido repetitivo
         words = content.split()
-        if len(words) < 10:
-            score *= 0.8
+        if len(words) > 0:
+            unique_words = set(words)
+            repetition_ratio = len(unique_words) / len(words)
+            score *= (0.5 + repetition_ratio * 0.5)
         
-        # Penalización por alta proporción de caracteres especiales
-        special_chars = len(re.findall(r'[^\w\s]', content))
-        if special_chars / len(content) > 0.3:
-            score *= 0.8
-        
-        # Bonus por estructura gramatical correcta
-        if content[0].isupper() and content[-1] in '.!?':
-            score *= 1.1
-        
-        # Bonus por términos importantes
-        important_terms = self._extract_important_terms(content)
-        if important_terms:
-            score *= (1 + len(important_terms) * 0.1)
-        
-        # Bonus por estructura de lista o numeración
-        if re.search(r'(?:^|\n)[•\-\*]|\d+\.', content):
+        # Bonus por estructuras importantes
+        if self._detect_structure_type(content) != "plain_text":
             score *= 1.2
         
-        # Bonus por presencia de definiciones o conceptos
-        if re.search(r'(?:es|son|se define|se refiere)', content.lower()):
+        # Bonus por términos importantes
+        if self._extract_important_terms(content):
             score *= 1.1
         
-        # Bonus por presencia de ejemplos
-        if re.search(r'(?:por ejemplo|ejemplo|como|tales como)', content.lower()):
-            score *= 1.1
-        
-        # Asegurar que el score no exceda 1.0
-        return min(score, 1.0)
+        return min(1.0, score)
+
+    def _detect_structure_type(self, content: str) -> str:
+        """Detecta el tipo de estructura en el contenido."""
+        if re.search(r'^\d+\.\s', content, re.MULTILINE):
+            return "numbered_list"
+        elif re.search(r'^[\u2022\-*•]\s', content, re.MULTILINE):
+            return "bullet_list"
+        elif re.search(r'^\|\s*[^\n]+\s*\|', content, re.MULTILINE):
+            return "table"
+        elif re.search(r'^[A-Z][^.!?]*:', content, re.MULTILINE):
+            return "definition"
+        else:
+            return "plain_text"
 
     def _detect_chunk_type(self, content: str) -> str:
         """Detecta el tipo de contenido del chunk."""
